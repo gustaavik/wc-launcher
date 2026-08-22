@@ -3,26 +3,26 @@
 #
 # The lines below are called `modelines`. See `:help modeline`
 
-name: "wc-launcher"
+name: "Wyvencraft"
 arch: ${GOARCH}
 platform: "linux"
 version: "0.1.0"
 section: "default"
 priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>
-description: "A wc-launcher application"
+description: "Sign in, keep Wyvencraft up to date, and play"
 vendor: "Wyvencraft"
 homepage: "https://wails.io"
 license: "MIT"
 release: "1"
 
 contents:
-  - src: "./bin/wc-launcher"
-    dst: "/usr/local/bin/wc-launcher"
+  - src: "./bin/Wyvencraft"
+    dst: "/usr/local/bin/Wyvencraft"
   - src: "./build/appicon.png"
-    dst: "/usr/share/icons/hicolor/128x128/apps/wc-launcher.png"
-  - src: "./build/linux/wc-launcher.desktop"
-    dst: "/usr/share/applications/wc-launcher.desktop"
+    dst: "/usr/share/icons/hicolor/128x128/apps/Wyvencraft.png"
+  - src: "./build/linux/Wyvencraft.desktop"
+    dst: "/usr/share/applications/Wyvencraft.desktop"
 
 # Default dependencies for the GTK4 + WebKitGTK 6.0 stack (Ubuntu 24.04+ / Debian 13+)
 depends:

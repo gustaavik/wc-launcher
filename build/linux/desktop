@@ -1,13 +1,13 @@
 [Desktop Entry]
 Version=1.0
-Name=My Product
-Comment=A wc-launcher application
+Name=Wyvencraft Launcher
+Comment=Sign in, keep Wyvencraft up to date, and play
 # The Exec line includes %u to pass the URL to the application
-Exec=/usr/local/bin/wc-launcher %u
+Exec=/usr/local/bin/Wyvencraft %u
 Terminal=false
 Type=Application
-Icon=wc-launcher
+Icon=Wyvencraft
 Categories=Utility;
-StartupWMClass=wc-launcher
+StartupWMClass=Wyvencraft
 
  

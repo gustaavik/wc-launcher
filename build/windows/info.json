@@ -6,10 +6,10 @@
 		"0000": {
 			"ProductVersion": "0.1.0",
 			"CompanyName": "Wyvencraft",
-			"FileDescription": "A wc-launcher application",
-			"LegalCopyright": "© 2026, Wyvencraft",
-			"ProductName": "My Product",
-			"Comments": "This is a comment"
+			"FileDescription": "Sign in, keep Wyvencraft up to date, and play",
+			"LegalCopyright": "© 2026 Wyvencraft",
+			"ProductName": "Wyvencraft Launcher",
+			"Comments": "The Wyvencraft game launcher"
 		}
 	}
 }
