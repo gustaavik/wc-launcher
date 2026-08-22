@@ -15,6 +15,16 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as $models from "./models.js";
 
 /**
+ * ApplyLauncherUpdate replaces this launcher with the staged one and restarts.
+ * 
+ * On success the launcher quits: the process being replaced cannot do the
+ * replacing, so the staged build does it and starts the result.
+ */
+export function ApplyLauncherUpdate(): $CancellablePromise<string> {
+    return $Call.ByID(3678226057);
+}
+
+/**
  * Cancel stops an install in progress. A no-op when none is running.
  * 
  * The partially downloaded file is kept, so resuming later picks up where this
@@ -22,6 +32,16 @@ import * as $models from "./models.js";
  */
 export function Cancel(): $CancellablePromise<void> {
     return $Call.ByID(1848413830);
+}
+
+/**
+ * CancelLauncher stops a launcher download in progress. A no-op when none is.
+ * 
+ * The partially downloaded file is kept, so resuming later picks up where this
+ * left off rather than starting again.
+ */
+export function CancelLauncher(): $CancellablePromise<void> {
+    return $Call.ByID(1750221450);
 }
 
 /**
@@ -36,6 +56,17 @@ export function Check(): $CancellablePromise<$models.UpdateStatus> {
 }
 
 /**
+ * CheckLauncher reports whether a newer launcher is published.
+ * 
+ * Never fails outright, for the same reason Check does not: a launcher that
+ * cannot reach GitHub is still a working launcher, and saying so is more use
+ * than an error.
+ */
+export function CheckLauncher(): $CancellablePromise<$models.LauncherStatus> {
+    return $Call.ByID(2378162748);
+}
+
+/**
  * Install downloads and unpacks the latest release.
  * 
  * Progress arrives on the "update:progress" event rather than as a return
@@ -43,6 +74,19 @@ export function Check(): $CancellablePromise<$models.UpdateStatus> {
  */
 export function Install(): $CancellablePromise<string> {
     return $Call.ByID(2636151423);
+}
+
+/**
+ * InstallLauncher downloads, verifies and unpacks the newest launcher.
+ * 
+ * Nothing is replaced here: the build is staged, and ApplyLauncherUpdate puts
+ * it in place. Splitting the two keeps the restart something the player asks
+ * for rather than something a download does to them.
+ * 
+ * Progress arrives on the "launcher:progress" event.
+ */
+export function InstallLauncher(): $CancellablePromise<string> {
+    return $Call.ByID(4124118839);
 }
 
 /**

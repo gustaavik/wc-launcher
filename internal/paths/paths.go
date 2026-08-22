@@ -7,6 +7,7 @@
 //	  versions/<tag>/    an installed game build: the binary plus assets/
 //	  data/              the game's WYVEN_DATA_DIR: saves, profile.toml, ...
 //	  logs/              launcher.log, game.log
+//	  launcher-update/   a downloaded launcher build, until it replaces this one
 //
 // The split between versions/ and data/ is the point. Applying an update
 // replaces a whole version directory, so nothing that must survive one may live
@@ -84,6 +85,22 @@ func (l Layout) KeysFile() string { return filepath.Join(l.Data, "authkeys.toml"
 
 // GameLog is where the child process's stderr is mirrored.
 func (l Layout) GameLog() string { return filepath.Join(l.Logs, "game.log") }
+
+// LauncherLog is the launcher's own log.
+func (l Layout) LauncherLog() string { return filepath.Join(l.Logs, "launcher.log") }
+
+// LauncherUpdateRoot holds a downloaded launcher build until it is swapped in.
+//
+// Deliberately outside versions/, which the game installer prunes: a staged
+// launcher is not a game build and must not be deleted to make room for one.
+func (l Layout) LauncherUpdateRoot() string { return filepath.Join(l.Root, "launcher-update") }
+
+// LauncherUpdateDir is where one staged launcher build is unpacked. The tag is
+// sanitised exactly as VersionDir sanitises it, and for the same reason: it
+// comes from a remote server and would otherwise be a path traversal.
+func (l Layout) LauncherUpdateDir(tag string) string {
+	return filepath.Join(l.LauncherUpdateRoot(), safeTag(tag))
+}
 
 // appDataRoot is the OS application-data directory, without the AppDir suffix.
 //

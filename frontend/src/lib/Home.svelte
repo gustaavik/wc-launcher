@@ -1,4 +1,7 @@
 <script lang="ts">
+  import LauncherUpdate from "./LauncherUpdate.svelte";
+  import ProgressPanel from "./ProgressPanel.svelte";
+  import { shortDate } from "./format";
   import { launcher } from "./state.svelte";
 
   let showLog = $state(false);
@@ -18,30 +21,6 @@
   function press() {
     if (action.kind === "play") void launcher.play();
     else void launcher.install();
-  }
-
-  function phaseLabel(phase: string): string {
-    switch (phase) {
-      case "downloading": return "Downloading";
-      case "verifying": return "Verifying";
-      case "extracting": return "Unpacking";
-      case "done": return "Done";
-      case "cancelled": return "Cancelled";
-      case "failed": return "Failed";
-      default: return phase;
-    }
-  }
-
-  function mb(bytes: number): string {
-    return (bytes / 1024 / 1024).toFixed(1);
-  }
-
-  function shortDate(iso: string): string {
-    if (!iso) return "";
-    const at = new Date(iso);
-    return Number.isNaN(at.getTime())
-      ? ""
-      : at.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
   }
 </script>
 
@@ -88,6 +67,8 @@
         <p class="error">{launcher.banner}</p>
       {/if}
 
+      <LauncherUpdate />
+
       <div class="versions panel">
         <div class="row">
           <span class="key">Installed</span>
@@ -103,22 +84,7 @@
       </div>
 
       {#if progress && launcher.installing}
-        <div class="progress panel">
-          <div class="bar">
-            <div
-              class="fill"
-              class:indeterminate={progress.percent < 0}
-              style={progress.percent >= 0 ? `width:${progress.percent}%` : ""}
-            ></div>
-          </div>
-          <div class="progress-text">
-            <span>{phaseLabel(progress.phase)}</span>
-            {#if progress.total > 0}
-              <span>{mb(progress.received)} / {mb(progress.total)} MB</span>
-            {/if}
-          </div>
-          <button class="ghost" onclick={() => launcher.cancelInstall()}>Cancel</button>
-        </div>
+        <ProgressPanel {progress} oncancel={() => launcher.cancelInstall()} />
       {/if}
 
       <button class="primary big" onclick={press} disabled={!action.enabled}>
@@ -126,7 +92,15 @@
       </button>
 
       <div class="tools">
-        <button class="ghost" onclick={() => launcher.check()} disabled={launcher.busy || launcher.installing}>
+        <button
+          class="ghost"
+          onclick={() => {
+            launcher.selfDismissed = false;
+            void launcher.check();
+            void launcher.checkSelf();
+          }}
+          disabled={launcher.busy || launcher.installing}
+        >
           Check for updates
         </button>
         {#if launcher.game.running}
@@ -204,39 +178,6 @@
   .row { display: flex; justify-content: space-between; font-size: 0.85rem; }
   .key { color: var(--muted); }
   .val { font-variant-numeric: tabular-nums; }
-
-  .progress { padding: var(--s-2); display: flex; flex-direction: column; gap: 0.5rem; }
-  .bar {
-    height: 6px;
-    border-radius: 3px;
-    background: rgba(0, 0, 0, 0.4);
-    overflow: hidden;
-  }
-  .fill {
-    height: 100%;
-    background: var(--grad);
-    transition: width 150ms linear;
-  }
-  /* Verifying and unpacking have no measurable progress; a sliding bar says
-     "working" without claiming a percentage it does not have. */
-  .fill.indeterminate {
-    width: 35%;
-    animation: slide 1.1s ease-in-out infinite;
-  }
-  @keyframes slide {
-    0% { margin-left: -35%; }
-    100% { margin-left: 100%; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .fill.indeterminate { animation: none; width: 100%; opacity: 0.5; }
-  }
-  .progress-text {
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.78rem;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-  }
 
   .big { padding: 0.8rem; font-size: 1rem; }
   .tools { display: flex; flex-wrap: wrap; gap: 0.25rem; font-size: 0.8rem; }

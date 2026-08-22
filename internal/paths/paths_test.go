@@ -91,3 +91,37 @@ func TestOrdinaryTagsSurviveSanitisingUnchanged(t *testing.T) {
 		}
 	}
 }
+
+func TestLauncherUpdateStagingIsOutsideVersions(t *testing.T) {
+	// The game installer prunes versions/ down to two builds. A staged launcher
+	// living there would be deleted to make room for a game update.
+	l := Layout{
+		Root:     "/root",
+		Versions: "/root/versions",
+	}
+
+	for _, path := range []string{l.LauncherUpdateRoot(), l.LauncherUpdateDir("v0.2.0")} {
+		if strings.HasPrefix(path, l.Versions) {
+			t.Errorf("%q lives under versions/ and would be pruned", path)
+		}
+		if !strings.HasPrefix(path, l.Root) {
+			t.Errorf("%q lives outside the launcher's own directory", path)
+		}
+	}
+}
+
+// The same argument as TestAHostileTagCannotEscapeTheVersionsDirectory: the tag
+// comes from GitHub, and LauncherUpdateDir is a path the launcher writes to.
+func TestAHostileTagCannotEscapeTheLauncherUpdateDirectory(t *testing.T) {
+	l := Layout{Root: "/root"}
+
+	for _, tag := range []string{"../../etc", "..", ".", "/absolute", `..\..\windows`, "", "v1/../../.."} {
+		dir := l.LauncherUpdateDir(tag)
+		if filepath.Dir(dir) != l.LauncherUpdateRoot() {
+			t.Errorf("tag %q produced %q, which is not directly under %q", tag, dir, l.LauncherUpdateRoot())
+		}
+		if base := filepath.Base(dir); base == "." || base == ".." || strings.HasPrefix(base, ".") {
+			t.Errorf("tag %q produced %q, which is a traversal or hidden name", tag, base)
+		}
+	}
+}

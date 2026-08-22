@@ -13,6 +13,7 @@ export {
 export type {
     AccountView,
     GameStatus,
+    LauncherStatus,
     LoginResult,
     ReleaseView,
     ServerInfo,

@@ -19,6 +19,53 @@ export interface AccountView {
 export type GameStatus = gamesvc$0.Status;
 
 /**
+ * LauncherStatus is what the UI needs to decide whether to offer an update to
+ * the launcher itself.
+ */
+export interface LauncherStatus {
+    /**
+     * Current is the tag this launcher was built from, or "dev".
+     */
+    "current": string;
+
+    /**
+     * Latest is nil when the check could not be made.
+     */
+    "latest": ReleaseView | null;
+
+    /**
+     * UpdateAvailable is true when GitHub publishes a different tag.
+     */
+    "updateAvailable": boolean;
+
+    /**
+     * Staged is true when the update is downloaded and only needs a restart.
+     */
+    "staged": boolean;
+
+    /**
+     * Supported is false when the release has no build for this platform.
+     */
+    "supported": boolean;
+
+    /**
+     * Writable is false when the launcher is installed somewhere it cannot
+     * replace itself. Worth knowing before a download rather than after one.
+     */
+    "writable": boolean;
+
+    /**
+     * Dev is true for an unstamped build, which never updates itself.
+     */
+    "dev": boolean;
+
+    /**
+     * Message explains anything the fields above cannot.
+     */
+    "message": string;
+}
+
+/**
  * LoginResult is what the sign-in form gets back.
  */
 export interface LoginResult {

@@ -5,7 +5,7 @@
 
 import { Events } from "@wailsio/runtime";
 import { AuthService, GameService, UpdateService } from "../../bindings/github.com/gustaavik/wc-launcher/internal/services";
-import type { AccountView, GameStatus, UpdateStatus } from "../../bindings/github.com/gustaavik/wc-launcher/internal/services";
+import type { AccountView, GameStatus, LauncherStatus, UpdateStatus } from "../../bindings/github.com/gustaavik/wc-launcher/internal/services";
 import type { Progress } from "../../bindings/github.com/gustaavik/wc-launcher/internal/install";
 
 export type Route = "loading" | "login" | "home" | "settings";
@@ -22,6 +22,15 @@ class LauncherState {
     progress = $state<Progress | null>(null);
     installing = $state(false);
 
+    /** The launcher's own update. Independent of the game's: it comes from
+     *  GitHub rather than the account server, and works signed out. */
+    selfUpdate = $state<LauncherStatus | null>(null);
+    selfProgress = $state<Progress | null>(null);
+    selfBusy = $state(false);
+    /** Set when the player closes the update strip, so it stays closed for
+     *  this session rather than reappearing on the next check. */
+    selfDismissed = $state(false);
+
     game = $state<GameStatus>({ running: false, pid: 0, exitCode: 0, message: "" });
     log = $state<string[]>([]);
 
@@ -33,6 +42,13 @@ class LauncherState {
 
     get signedIn(): boolean {
         return this.account !== null;
+    }
+
+    /** Whether to show the launcher-update strip at all. */
+    get selfUpdateVisible(): boolean {
+        const status = this.selfUpdate;
+        if (!status || this.selfDismissed) return false;
+        return status.updateAvailable && status.supported;
     }
 
     /** What the big button should say, given everything else. */
@@ -63,6 +79,12 @@ class LauncherState {
             this.installing = phase === "downloading" || phase === "verifying" || phase === "extracting";
         });
 
+        Events.On("launcher:progress", (event) => {
+            this.selfProgress = event.data ?? null;
+            const phase = this.selfProgress?.phase;
+            this.selfBusy = phase === "downloading" || phase === "verifying" || phase === "extracting";
+        });
+
         Events.On("game:state", (event) => {
             const status = event.data;
             if (!status) return;
@@ -87,6 +109,10 @@ class LauncherState {
         if (result.error) this.banner = result.error;
         this.route = this.account ? "home" : "login";
         if (this.account) void this.check();
+        // Not gated on being signed in: updating the launcher needs no account,
+        // and a launcher too old to sign in is exactly the one that must be
+        // able to replace itself.
+        void this.checkSelf();
     }
 
     async check() {
@@ -113,6 +139,35 @@ class LauncherState {
 
     cancelInstall() {
         void UpdateService.Cancel();
+    }
+
+    async checkSelf() {
+        this.selfUpdate = await UpdateService.CheckLauncher();
+    }
+
+    async installSelf() {
+        this.selfBusy = true;
+        this.banner = "";
+        try {
+            const error = await UpdateService.InstallLauncher();
+            if (error) this.banner = error;
+            await this.checkSelf();
+        } finally {
+            this.selfBusy = false;
+            this.selfProgress = null;
+        }
+    }
+
+    /** Hand over to the downloaded launcher. On success this window goes away:
+     *  the new build replaces this one and starts itself. */
+    async restartToUpdate() {
+        this.banner = "";
+        const error = await UpdateService.ApplyLauncherUpdate();
+        if (error) this.banner = error;
+    }
+
+    cancelSelfInstall() {
+        void UpdateService.CancelLauncher();
     }
 
     async play() {

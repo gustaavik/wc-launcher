@@ -99,11 +99,11 @@ func TestParseChecksumFileReadsWhatShasumWrites(t *testing.T) {
 	const hash = "51295ab76d3e630c3efbc54e086203712c3cc76c80965ed9cbe90326336836d5"
 	line := hash + "  wyvencraft-v0.0.1-aarch64-apple-darwin.tar.gz\n"
 
-	if got := parseChecksumFile(line); got != hash {
+	if got := ParseChecksum(line); got != hash {
 		t.Errorf("parseChecksumFile = %q, want %q", got, hash)
 	}
 	// Uppercase is still valid hex.
-	if got := parseChecksumFile(strings.ToUpper(hash) + "  file"); got != hash {
+	if got := ParseChecksum(strings.ToUpper(hash) + "  file"); got != hash {
 		t.Errorf("uppercase hash = %q", got)
 	}
 }
@@ -112,8 +112,8 @@ func TestParseChecksumFileReadsWhatShasumWrites(t *testing.T) {
 // that happens to compare unequal and produces a confusing mismatch message.
 func TestParseChecksumFileRejectsAnythingThatIsNotAHash(t *testing.T) {
 	for _, input := range []string{"", "   ", "not-a-hash  file", "deadbeef  file", "zz" + strings.Repeat("0", 62)} {
-		if got := parseChecksumFile(input); got != "" {
-			t.Errorf("parseChecksumFile(%q) = %q, want empty", input, got)
+		if got := ParseChecksum(input); got != "" {
+			t.Errorf("ParseChecksum(%q) = %q, want empty", input, got)
 		}
 	}
 }
