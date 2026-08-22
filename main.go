@@ -17,7 +17,9 @@ import (
 	"github.com/gustaavik/wc-launcher/internal/gamesvc"
 	"github.com/gustaavik/wc-launcher/internal/install"
 	"github.com/gustaavik/wc-launcher/internal/paths"
+	"github.com/gustaavik/wc-launcher/internal/selfupdate"
 	"github.com/gustaavik/wc-launcher/internal/services"
+	"github.com/gustaavik/wc-launcher/internal/version"
 )
 
 //go:embed all:frontend/dist
@@ -28,22 +30,40 @@ func init() {
 	// bindings for each event.
 	application.RegisterEvent[*services.AccountView]("auth:changed")
 	application.RegisterEvent[install.Progress]("update:progress")
+	application.RegisterEvent[install.Progress]("launcher:progress")
 	application.RegisterEvent[gamesvc.Status]("game:state")
 	application.RegisterEvent[string]("game:log")
 }
 
 func main() {
+	// Started by a launcher that is updating itself: replace it, restart it,
+	// and never build a UI. Checked before anything else so an update cannot be
+	// derailed by a problem with the directories or the log file.
+	if len(os.Args) == 4 && os.Args[1] == selfupdate.ApplyFlag {
+		if err := selfupdate.Swap(os.Args[2], os.Args[3]); err != nil {
+			log.Fatalf("could not apply the launcher update: %v", err)
+		}
+		return
+	}
+
 	layout, err := paths.New()
 	if err != nil {
 		log.Fatalf("could not prepare the Wyvencraft directory: %v", err)
 	}
 
-	logFile, err := os.OpenFile(layout.Root+"/logs/launcher.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	logFile, err := os.OpenFile(layout.LauncherLog(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err == nil {
 		defer logFile.Close()
 		slog.SetDefault(slog.New(slog.NewTextHandler(logFile, nil)))
 	}
-	slog.Info("launcher starting", "root", layout.Root)
+	slog.Info("launcher starting", "version", version.Current, "root", layout.Root)
+
+	// Whatever the last update staged has either been applied or abandoned by
+	// the time a launcher starts normally. Either way it is a copy of the app
+	// nobody needs, and it is tens of megabytes.
+	if err := os.RemoveAll(layout.LauncherUpdateRoot()); err != nil {
+		slog.Warn("could not clear the staged launcher update", "error", err)
+	}
 
 	// The emitter is set once the app exists, so Core is built with none and
 	// given one below. Events fired before then are dropped, which is fine:
@@ -66,6 +86,7 @@ func main() {
 		},
 	})
 	core.Emitter = appEmitter{app}
+	core.Quit = app.Quit
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:  "Wyvencraft",

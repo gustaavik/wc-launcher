@@ -20,10 +20,10 @@ func TestVerifyAcceptsAMatchingHashAndRejectsEverythingElse(t *testing.T) {
 	sum := sha256.Sum256(content)
 	good := hex.EncodeToString(sum[:])
 
-	if err := verify(path, good, nil); err != nil {
+	if err := Verify(path, good, nil); err != nil {
 		t.Errorf("a matching hash should verify: %v", err)
 	}
-	if err := verify(path, "00"+good[2:], nil); err == nil {
+	if err := Verify(path, "00"+good[2:], nil); err == nil {
 		t.Error("a mismatched hash should fail")
 	}
 }
@@ -36,7 +36,7 @@ func TestVerifyRefusesToPassWithNoExpectedHash(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := verify(path, "", nil); err == nil {
+	if err := Verify(path, "", nil); err == nil {
 		t.Fatal("an empty expected hash must not verify")
 	}
 }
@@ -53,7 +53,7 @@ func TestDownloadWritesTheWholeBodyAndReportsProgress(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "out.part")
 	var last Progress
-	err := download(context.Background(), server.URL, path, int64(len(body)), func(p Progress) {
+	err := Fetch(context.Background(), server.URL, path, int64(len(body)), func(p Progress) {
 		last = p
 	})
 	if err != nil {
@@ -91,7 +91,7 @@ func TestDownloadResumesFromAPartialFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := download(context.Background(), server.URL, path, int64(len(body)), nil); err != nil {
+	if err := Fetch(context.Background(), server.URL, path, int64(len(body)), nil); err != nil {
 		t.Fatalf("download: %v", err)
 	}
 	if sawRange != "bytes=10-" {
@@ -124,7 +124,7 @@ func TestAnOversizedPartialFileIsDiscardedRatherThanResumed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := download(context.Background(), server.URL, path, int64(len(body)), nil); err != nil {
+	if err := Fetch(context.Background(), server.URL, path, int64(len(body)), nil); err != nil {
 		t.Fatalf("download: %v", err)
 	}
 	got, _ := os.ReadFile(path)
@@ -139,7 +139,7 @@ func TestDownloadReportsAServerRefusal(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := download(context.Background(), server.URL, filepath.Join(t.TempDir(), "out.part"), 0, nil)
+	err := Fetch(context.Background(), server.URL, filepath.Join(t.TempDir(), "out.part"), 0, nil)
 	if err == nil {
 		t.Fatal("want an error for a 403")
 	}

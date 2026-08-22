@@ -21,6 +21,7 @@ declare module "@wailsio/runtime" {
             "auth:changed": services$0.AccountView | null;
             "game:log": string;
             "game:state": gamesvc$0.Status;
+            "launcher:progress": install$0.Progress;
             "update:progress": install$0.Progress;
         }
     }

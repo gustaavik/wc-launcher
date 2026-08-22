@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { AuthService } from "../../bindings/github.com/gustaavik/wc-launcher/internal/services";
   import type { SettingsView } from "../../bindings/github.com/gustaavik/wc-launcher/internal/services";
+  import LauncherUpdate from "./LauncherUpdate.svelte";
   import { launcher } from "./state.svelte";
 
   let settings = $state<SettingsView | null>(null);
@@ -9,6 +10,7 @@
   let logFilter = $state("");
   let message = $state("");
   let busy = $state(false);
+  let checkingLauncher = $state(false);
 
   onMount(async () => {
     settings = await AuthService.Settings();
@@ -37,6 +39,17 @@
 
   function back() {
     launcher.route = launcher.account ? "home" : "login";
+  }
+
+  async function checkLauncher() {
+    checkingLauncher = true;
+    // Undo an earlier dismissal: asking is a request to be told again.
+    launcher.selfDismissed = false;
+    try {
+      await launcher.checkSelf();
+    } finally {
+      checkingLauncher = false;
+    }
   }
 </script>
 
@@ -80,6 +93,29 @@
         </div>
       </div>
       <p class="hint">Saves live outside the install, so an update never touches them.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Launcher</h2>
+      <div class="paths">
+        <div>
+          <span class="key">Version</span>
+          <code>{launcher.selfUpdate?.current ?? "…"}</code>
+        </div>
+      </div>
+      <p class="hint">
+        The launcher updates itself from GitHub, separately from the game. It
+        does not need an account server, or an account.
+      </p>
+      {#if launcher.selfUpdate?.message}
+        <p class="hint">{launcher.selfUpdate.message}</p>
+      {:else if launcher.selfUpdate && !launcher.selfUpdate.updateAvailable}
+        <p class="hint">This is the newest launcher.</p>
+      {/if}
+      <LauncherUpdate />
+      <button class="ghost" onclick={checkLauncher} disabled={checkingLauncher || launcher.selfBusy}>
+        {checkingLauncher ? "Checking…" : "Check for a launcher update"}
+      </button>
     </section>
 
     {#if message}

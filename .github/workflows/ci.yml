@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A push to a pull request supersedes whatever is still running for it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  WAILS_VERSION: v3.0.0-beta.12
+  APP_NAME: Wyvencraft
+
+jobs:
+  # Split out so a failing test reports in under a minute rather than waiting
+  # on a full Wails build. Nothing under internal/ imports Wails, so this needs
+  # neither a Mac nor the GTK/WebKit headers.
+  go:
+    name: vet + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # `./...` would pull in build/ios, wails scaffolding that only compiles
+      # under the `ios` build tag. The root package is covered by the app job,
+      # which is the only place its cgo dependencies exist.
+      - run: go vet ./internal/...
+      - run: go test -race ./internal/...
+
+  # The build the release workflow performs, minus signing. This is what catches
+  # a broken main.go, a stale binding, or a frontend that no longer compiles.
+  app:
+    name: build the app bundle
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the wails3 CLI
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
+
+      - run: npm ci
+        working-directory: frontend
+
+      - run: npx svelte-check --tsconfig ./tsconfig.json
+        working-directory: frontend
+
+      # Host architecture only: this is a smoke test, and lipoing a second
+      # architecture doubles the build for no extra signal.
+      - run: wails3 task darwin:package
+
+      # generate:bindings rewrites frontend/bindings, which is committed. A diff
+      # here means somebody changed a service signature without regenerating,
+      # and the frontend in the repository is calling a method id that is gone.
+      - name: Check the committed bindings are current
+        run: git diff --exit-code -- frontend/bindings

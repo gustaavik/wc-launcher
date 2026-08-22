@@ -11,6 +11,7 @@ import (
 	"github.com/gustaavik/wc-launcher/internal/install"
 	"github.com/gustaavik/wc-launcher/internal/markdown"
 	"github.com/gustaavik/wc-launcher/internal/paths"
+	"github.com/gustaavik/wc-launcher/internal/selfupdate"
 	"github.com/gustaavik/wc-launcher/internal/wcauth"
 )
 
@@ -64,12 +65,23 @@ type Core struct {
 	Runner   *gamesvc.Runner
 	Install  *install.Installer
 	Client   *wcauth.Client
+	Launcher *selfupdate.Client
 	Settings config.Settings
+	// Quit shuts the launcher down. Set by main once the app exists; nil in
+	// tests. Applying a launcher update is the only thing that needs it, and
+	// routing it through a func is what keeps Wails out of this package.
+	Quit func()
 
 	mu sync.Mutex
 	// installing guards against a second Install while one is in flight, and
 	// carries the cancel func for the running one.
 	cancelInstall context.CancelFunc
+	// cancelLauncher is the same for a launcher self-update. Separate, because
+	// the two are unrelated downloads and cancelling one must not stop the
+	// other.
+	cancelLauncher context.CancelFunc
+	// stagedLauncher is the unpacked launcher build waiting for a restart.
+	stagedLauncher string
 }
 
 // NewCore wires everything together.
@@ -83,6 +95,7 @@ func NewCore(layout paths.Layout, emitter Emitter) *Core {
 		Emitter:  emitter,
 		Runner:   runner,
 		Client:   client,
+		Launcher: selfupdate.NewClient(""),
 		Settings: settings,
 	}
 	core.Session = NewSession(layout, client, runner.Running)
@@ -134,6 +147,13 @@ func userMessage(err error) string {
 	var refused *wcauth.Error
 	if errors.As(err, &refused) {
 		return refused.Error()
+	}
+	if selfupdate.Unreachable(err) {
+		return "Could not reach GitHub. Check your connection and try again."
+	}
+	var github *selfupdate.Error
+	if errors.As(err, &github) {
+		return github.Error()
 	}
 	return err.Error()
 }

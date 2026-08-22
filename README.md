@@ -35,6 +35,7 @@ versions/<tag>/    an installed build: the wyvencraft binary plus assets/
 data/              the game's WYVEN_DATA_DIR
   saves/  profile.toml  authkeys.toml  ops.toml
 logs/              launcher.log, game.log
+launcher-update/   a downloaded launcher, until it replaces the running one
 ```
 
 `versions/` and `data/` are separate on purpose: applying an update replaces a
@@ -45,10 +46,11 @@ so starting it by hand finds the same worlds.
 ## Running it
 
 ```sh
-wails3 dev      # hot reload, both sides
-wails3 task build     # -> bin/wc-launcher
-wails3 task package   # -> bin/Wyvencraft Launcher.app  (macOS)
-go test ./internal/...
+wails3 dev                            # hot reload, both sides
+wails3 task build                     # -> bin/Wyvencraft
+wails3 task package                   # -> bin/Wyvencraft.app  (host arch)
+wails3 task darwin:package:universal   # -> bin/Wyvencraft.app  (arm64 + amd64)
+go test -race ./internal/...
 ```
 
 `go-task` need not be installed separately; `wails3 task` runs the same targets.
@@ -98,9 +100,64 @@ WCL_DEV_GAME_DIR=/tmp/wc-devgame \
 | `internal/wcauth` | The account-server client: login, refresh, logout, keys, releases |
 | `internal/profile` | `profile.toml` and `authkeys.toml` — the handoff to the game |
 | `internal/install` | Asset selection, resumable download, checksum, unpack |
+| `internal/selfupdate` | The launcher's own update: GitHub releases, staging, the swap |
+| `internal/version` | Which build this is, stamped in by the release workflow |
 | `internal/gamesvc` | Child environment, Vulkan discovery, spawn, stderr streaming |
 | `internal/markdown` | Release notes → HTML, with raw HTML dropped |
 | `internal/services` | The three objects the frontend calls, and the session rules |
+
+## Updating the launcher itself
+
+The game is updated through wcauthserver, which brokers downloads from the
+private game repository. The launcher is not: this repository is public, so the
+launcher reads its own releases straight from the GitHub API, with no token and
+no account. That matters — a launcher too old to sign in is exactly the one that
+has to be able to replace itself.
+
+It checks once at startup and offers a strip on the home screen. **Download**
+fetches the release asset, verifies its SHA-256, unpacks it into
+`launcher-update/`, and checks that the bundle is signed by team `S6EF64ZEMD`
+before going anywhere near the installed copy — TLS and the checksum prove the
+bytes came from GitHub intact, and the signature proves GitHub was serving ours.
+
+**Restart to update** hands over to the downloaded build. A process cannot
+replace itself, so the new launcher does it: it starts with `--apply-update
+<target> <pid>`, waits for this one to quit, copies itself into place with
+`ditto`, and reopens. The copy lands beside the target first, so a failure never
+leaves the Applications folder without a launcher in it.
+
+Neither step runs while Wyvencraft does. The rules below are why.
+
+## Releasing
+
+Publish a GitHub release and `.github/workflows/release.yml` does the rest: it
+builds a universal `.app`, signs it with the Developer ID certificate, notarizes
+it, staples the ticket, and attaches
+`wc-launcher-<tag>-macos-universal.zip` plus its `.sha256` to the release.
+
+```sh
+gh release create v0.2.0 --generate-notes
+```
+
+The tag is what the launcher compares itself against, and the workflow stamps it
+into `internal/version/VERSION` before building. A local build says `dev` and
+never offers to update itself.
+
+Six repository secrets, all macOS signing:
+
+| Secret | What |
+| --- | --- |
+| `MACOS_CERT_P12` | base64 of the exported Developer ID Application `.p12` |
+| `MACOS_CERT_PASSWORD` | its export password |
+| `MACOS_SIGN_IDENTITY` | `Developer ID Application: … (S6EF64ZEMD)` |
+| `APPLE_API_KEY_P8` | base64 of the App Store Connect `.p8` |
+| `APPLE_API_KEY_ID` | that key's id |
+| `APPLE_API_ISSUER_ID` | the issuer id |
+
+The workflow runs only on `release: published` and `workflow_dispatch`, both of
+which execute in this repository's own context. **Do not add a `pull_request`
+trigger**: this repository is public, and that would hand the signing key to
+anyone who opens a fork PR.
 
 ## Two rules worth not breaking
 

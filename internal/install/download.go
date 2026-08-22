@@ -36,12 +36,12 @@ const progressInterval = 100 * time.Millisecond
 // a few hundred megabytes is not a failure.
 const downloadTimeout = 30 * time.Minute
 
-// download fetches url into path, resuming if a partial file is already there.
+// Fetch downloads url into path, resuming if a partial file is already there.
 //
 // Resume matters more than it looks: these URLs are short-lived, so a download
 // interrupted near the end would otherwise restart from zero after the launcher
 // asks for a fresh one.
-func download(ctx context.Context, url, path string, expectSize int64, report ProgressFunc) error {
+func Fetch(ctx context.Context, url, path string, expectSize int64, report ProgressFunc) error {
 	resumeFrom := int64(0)
 	if info, err := os.Stat(path); err == nil {
 		resumeFrom = info.Size()
@@ -84,7 +84,7 @@ func download(ctx context.Context, url, path string, expectSize int64, report Pr
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("discard stale partial download: %w", err)
 		}
-		return download(ctx, url, path, expectSize, report)
+		return Fetch(ctx, url, path, expectSize, report)
 	default:
 		return fmt.Errorf("download failed: the server answered %s", resp.Status)
 	}
@@ -153,11 +153,11 @@ func progressOf(phase string, received, total int64) Progress {
 	return Progress{Phase: phase, Received: received, Total: total, Percent: percent}
 }
 
-// verify checks a file's SHA-256 against wantHex.
+// Verify checks a file's SHA-256 against wantHex.
 //
 // An empty wantHex is an error, not a pass. Skipping verification because a
 // digest was missing is how an unverified binary gets executed.
-func verify(path, wantHex string, report ProgressFunc) error {
+func Verify(path, wantHex string, report ProgressFunc) error {
 	if wantHex == "" {
 		return fmt.Errorf("no checksum published for this build; refusing to install it unverified")
 	}
@@ -183,8 +183,8 @@ func verify(path, wantHex string, report ProgressFunc) error {
 	return nil
 }
 
-// parseChecksumFile reads a `shasum -a 256` line: "<hex>  <filename>".
-func parseChecksumFile(contents string) string {
+// ParseChecksum reads a `shasum -a 256` line: "<hex>  <filename>".
+func ParseChecksum(contents string) string {
 	fields := strings.Fields(strings.TrimSpace(contents))
 	if len(fields) == 0 {
 		return ""

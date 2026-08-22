@@ -93,11 +93,11 @@ func (i *Installer) Install(ctx context.Context, accessToken string, release wca
 	if err != nil {
 		return fmt.Errorf("could not get a download link: %w", err)
 	}
-	if err := download(ctx, url, partial, asset.SizeBytes(), report); err != nil {
+	if err := Fetch(ctx, url, partial, asset.SizeBytes(), report); err != nil {
 		return err
 	}
 
-	if err := verify(partial, wantHash, report); err != nil {
+	if err := Verify(partial, wantHash, report); err != nil {
 		// A mismatched file will never verify, so keeping it would make every
 		// later attempt resume onto corrupt bytes.
 		os.Remove(partial)
@@ -177,7 +177,7 @@ func (i *Installer) expectedHash(ctx context.Context, accessToken string, releas
 	if err != nil {
 		return "", fmt.Errorf("read the checksum: %w", err)
 	}
-	hash := parseChecksumFile(string(body))
+	hash := ParseChecksum(string(body))
 	if hash == "" {
 		return "", fmt.Errorf("could not read a checksum for %s", asset.Name)
 	}

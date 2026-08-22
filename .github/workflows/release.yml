@@ -1,0 +1,215 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to build and upload to"
+        required: true
+
+# `gh release upload` writes to the release.
+permissions:
+  contents: write
+
+# This workflow holds the Developer ID key and the notary credentials, in a
+# public repository. Both triggers above run in this repository's own context.
+# Do not add `pull_request`: that would hand the signing key to anyone who
+# opens a pull request from a fork.
+
+env:
+  # Must match the wails/v3 version in go.mod, or the CLI and the library
+  # disagree about the generated bindings.
+  WAILS_VERSION: v3.0.0-beta.12
+  # APP_NAME in Taskfile.yml, which is what names bin/<APP_NAME>.app.
+  APP_NAME: Wyvencraft
+
+jobs:
+  macos:
+    name: macOS universal
+    runs-on: macos-latest
+    steps:
+      - name: Resolve the release tag
+        run: echo "TAG=${{ github.event.release.tag_name || inputs.tag }}" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          # A workflow_dispatch run builds the tagged source, not the branch head.
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          # Vite 8 needs Node 20.19+ / 22.12+.
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the wails3 CLI
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
+
+      - name: Install the frontend dependencies
+        # The Taskfile runs `npm install`; doing this first is what pins the
+        # build to the lockfile.
+        run: npm ci
+        working-directory: frontend
+
+      - name: Stamp the version
+        run: |
+          set -euo pipefail
+          # What the launcher compares against GitHub when it checks itself.
+          printf '%s' "$TAG" > internal/version/VERSION
+
+          # CFBundleShortVersionString is shown to people, so it keeps the whole
+          # tag. CFBundleVersion must be dotted digits, so a -rc.1 suffix is
+          # trimmed from that one only.
+          SHORT="${TAG#v}"
+          NUMERIC=$(printf '%s' "$SHORT" | sed 's/[^0-9.].*$//')
+          NUMERIC="${NUMERIC:-0.0.0}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SHORT" build/darwin/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NUMERIC" build/darwin/Info.plist
+
+      - name: Build the universal app bundle
+        # arm64 and amd64 lipo'd into one binary, so a single notarization
+        # covers every Mac. The task ad-hoc signs the bundle at the end; the
+        # Developer ID signature below replaces that.
+        run: wails3 task darwin:package:universal
+
+      - name: Check the bundle really is universal
+        run: |
+          set -euo pipefail
+          BINARY="bin/${APP_NAME}.app/Contents/MacOS/${APP_NAME}"
+          lipo -info "$BINARY"
+          # A silently single-architecture build would ship a launcher half the
+          # Macs cannot run, and nothing later in this job would notice.
+          lipo -info "$BINARY" | grep -q "x86_64 arm64"
+
+      - name: Import the Developer ID certificate
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          # Nothing outside this job ever needs this password, so nothing
+          # outside this job knows it.
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 24)
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          printf '%s' "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+          # Without this, codesign prompts for permission to use the key, and a
+          # runner has nobody to answer the prompt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+
+          # codesign looks for identities in the search list, so the new
+          # keychain has to be on it.
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | tr -d '"')
+
+      - name: Sign
+        env:
+          IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          set -euo pipefail
+          # --options runtime is the hardened runtime, which notarization
+          # requires. No entitlements: the bundle carries no nested code, and
+          # WKWebView's JIT lives in a system-signed process of its own.
+          # A Developer ID signature is timestamped by default.
+          codesign --force --deep --options runtime --sign "$IDENTITY" "bin/${APP_NAME}.app"
+          codesign --verify --deep --strict --verbose=2 "bin/${APP_NAME}.app"
+
+      - name: Notarize
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          KEY="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$KEY"
+          trap 'rm -f "$KEY"' EXIT
+
+          # ditto, not zip: a code signature survives only an exact copy.
+          ditto -c -k --keepParent "bin/${APP_NAME}.app" "$RUNNER_TEMP/notarize.zip"
+
+          if ! xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+              --key "$KEY" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" \
+              --wait --timeout 30m --output-format json > "$RUNNER_TEMP/notary.json"; then
+            echo "notarytool exited non-zero"
+          fi
+          cat "$RUNNER_TEMP/notary.json"
+
+          STATUS=$(jq -r '.status // "unknown"' "$RUNNER_TEMP/notary.json")
+          if [ "$STATUS" != "Accepted" ]; then
+            # The log names the binary or entitlement Apple objected to, which
+            # the submission response does not.
+            ID=$(jq -r '.id // empty' "$RUNNER_TEMP/notary.json")
+            if [ -n "$ID" ]; then
+              xcrun notarytool log "$ID" \
+                --key "$KEY" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" || true
+            fi
+            echo "notarization was not accepted: $STATUS" >&2
+            exit 1
+          fi
+
+      - name: Staple and package
+        run: |
+          set -euo pipefail
+          # Stapling writes the ticket into the bundle, so the app opens on a
+          # Mac that is offline the first time it is launched.
+          xcrun stapler staple "bin/${APP_NAME}.app"
+          xcrun stapler validate "bin/${APP_NAME}.app"
+
+          NAME="wc-launcher-${TAG}-macos-universal"
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+
+          # Zipped again, after stapling: the archive submitted for
+          # notarization does not carry the ticket.
+          mkdir -p dist
+          ditto -c -k --keepParent "bin/${APP_NAME}.app" "dist/${NAME}.zip"
+          # Recorded from inside dist/, so the file names a bare filename and a
+          # downloader can `shasum -c` it next to the archive.
+          (cd dist && shasum -a 256 "${NAME}.zip" > "${NAME}.zip.sha256")
+
+      - name: Prove Gatekeeper accepts it
+        # The check that catches a broken release here rather than on a
+        # player's Mac, where it shows up as "the app is damaged".
+        run: |
+          set -euo pipefail
+          spctl --assess --type exec -vv "bin/${APP_NAME}.app" 2>&1 | tee /tmp/spctl.txt
+          grep -q "source=Notarized Developer ID" /tmp/spctl.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: |
+            dist/${{ env.NAME }}.zip
+            dist/${{ env.NAME }}.zip.sha256
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$TAG" \
+            "dist/${NAME}.zip" "dist/${NAME}.zip.sha256" --clobber
+
+      - name: Remove the signing keychain
+        if: always()
+        run: |
+          if [ -n "${KEYCHAIN:-}" ] && [ -f "$KEYCHAIN" ]; then
+            security delete-keychain "$KEYCHAIN"
+          fi
+          rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/cert.p12"
