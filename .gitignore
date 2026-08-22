@@ -1,0 +1,10 @@
+.task
+bin
+frontend/dist
+frontend/node_modules
+build/appimage/build
+build/windows/nsis/*.exe
+build/ios/gen
+build/android/gen
+build/*/overlay
+.DS_Store

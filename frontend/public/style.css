@@ -1,0 +1,173 @@
+/* Wyvencraft launcher.
+   One stylesheet, loaded by index.html outside Vite (as the template does), so
+   the window has its colours before the first component mounts and there is no
+   white flash on a dark desktop. */
+
+:root {
+    /* Voxel-dusk palette: cold slate ground, ember accent. */
+    --ink: #0b0e14;
+    --panel: #131824;
+    --panel-2: #182031;
+    --text: #eef2f9;
+    --muted: #93a0ba;
+    --faint: #64708a;
+    --accent: #e8a13a;         /* torchlight */
+    --accent-2: #c46a1e;
+    --grad: linear-gradient(135deg, #e8a13a 0%, #c46a1e 100%);
+    --good: #6fc47f;
+    --bad: #e8685f;
+    --glass: rgba(255, 255, 255, 0.045);
+    --glass-strong: rgba(255, 255, 255, 0.075);
+    --border: rgba(255, 255, 255, 0.10);
+    --radius: 10px;
+
+    /* Golden-ratio spacing scale (φ ≈ 1.618). */
+    --s-1: 0.618rem;
+    --s-2: 1rem;
+    --s-3: 1.618rem;
+    --s-4: 2.618rem;
+
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji";
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--ink);
+    color: var(--text);
+}
+
+body {
+    overflow: hidden;
+    /* It is an app, not a document. Text inputs and the changelog opt back in. */
+    -webkit-user-select: none;
+    user-select: none;
+    /* The window is dragged by its background; controls opt out below. The
+       property inherits, so this has to be undone rather than applied. */
+    --wails-draggable: drag;
+}
+
+#app { height: 100%; }
+
+button, input, a, .changelog, .logbox {
+    --wails-draggable: no-drag;
+}
+input, .changelog, .logbox {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+/* ----- shared controls -------------------------------------------------- */
+
+button {
+    font: inherit;
+    color: var(--text);
+    background: var(--glass-strong);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.55rem var(--s-3);
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
+button:disabled { opacity: 0.45; cursor: default; }
+button:focus-visible, input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+button.primary {
+    background: var(--grad);
+    border-color: transparent;
+    color: #1a1206;
+    font-weight: 650;
+}
+button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+button.ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--muted);
+    padding: 0.3rem 0.5rem;
+}
+button.ghost:hover:not(:disabled) { color: var(--text); background: var(--glass); }
+
+input {
+    font: inherit;
+    width: 100%;
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.6rem 0.75rem;
+}
+input::placeholder { color: var(--faint); }
+
+.panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.error, .notice {
+    border-radius: var(--radius);
+    padding: 0.6rem 0.8rem;
+    font-size: 0.9rem;
+    line-height: 1.45;
+}
+.error {
+    background: rgba(232, 104, 95, 0.12);
+    border: 1px solid rgba(232, 104, 95, 0.35);
+    color: #ffc9c4;
+}
+.notice {
+    background: var(--glass);
+    border: 1px solid var(--border);
+    color: var(--muted);
+}
+
+/* Rendered release notes. The markup comes from the Go side, which strips raw
+   HTML, so only these element types can appear. */
+.changelog { line-height: 1.6; font-size: 0.92rem; color: var(--muted); }
+.changelog h1, .changelog h2, .changelog h3 {
+    color: var(--text);
+    font-size: 0.95rem;
+    margin: var(--s-3) 0 var(--s-1);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+.changelog h1:first-child, .changelog h2:first-child, .changelog h3:first-child { margin-top: 0; }
+.changelog p { margin: 0 0 var(--s-2); }
+.changelog ul, .changelog ol { margin: 0 0 var(--s-2); padding-left: 1.2rem; }
+.changelog li { margin-bottom: 0.3rem; }
+.changelog a { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
+.changelog a:hover { text-decoration: underline; }
+.changelog code {
+    background: rgba(0, 0, 0, 0.35);
+    border-radius: 4px;
+    padding: 0.1rem 0.35rem;
+    font-size: 0.85em;
+}
+.changelog pre {
+    background: rgba(0, 0, 0, 0.35);
+    border-radius: var(--radius);
+    padding: var(--s-2);
+    overflow-x: auto;
+}
+.changelog strong { color: var(--text); }
+.changelog hr { border: none; border-top: 1px solid var(--border); margin: var(--s-2) 0; }
+
+/* Thin scrollbars everywhere; the default macOS overlay bar is fine but the
+   Windows one is not. */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }

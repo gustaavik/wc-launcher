@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=My Product
+Comment=A wc-launcher application
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/wc-launcher %u
+Terminal=false
+Type=Application
+Icon=wc-launcher
+Categories=Utility;
+StartupWMClass=wc-launcher
+
+ 
