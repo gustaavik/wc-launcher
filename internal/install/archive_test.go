@@ -166,11 +166,11 @@ func TestACorruptArchiveFailsRatherThanProducingAPartialInstall(t *testing.T) {
 
 func TestResolveStripsOnlyTheFirstSegment(t *testing.T) {
 	dest := "/dest"
-	got, ok := resolve(dest, "pkg/assets/textures/dirt.png")
+	got, ok := resolve(dest, "pkg/assets/textures/blocks/dirt.png")
 	if !ok {
 		t.Fatal("should be allowed")
 	}
-	if want := filepath.Join(dest, "assets", "textures", "dirt.png"); got != want {
+	if want := filepath.Join(dest, "assets", "textures", "blocks", "dirt.png"); got != want {
 		t.Errorf("resolve = %q, want %q", got, want)
 	}
 }
