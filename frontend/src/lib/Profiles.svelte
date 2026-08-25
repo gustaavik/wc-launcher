@@ -56,7 +56,7 @@
 
 <div class="shell">
   <header>
-    <button class="ghost" onclick={() => (launcher.route = "home")}
+    <button class="ghost" onclick={() => launcher.back()}
       >← Back</button
     >
     <strong>Profiles</strong>

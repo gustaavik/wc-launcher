@@ -9,6 +9,12 @@ import (
 	"github.com/gustaavik/wc-launcher/internal/wcauth"
 )
 
+// signInToDownload is the refusal a signed-out player gets from anything that
+// reaches the release broker. The game repository is private, so the account
+// server brokers every download against the player's own token — this is the
+// one thing playing offline cannot do.
+const signInToDownload = "Sign in to download Wyvencraft."
+
 // UpdateService checks for and installs game builds.
 type UpdateService struct{ core *Core }
 
@@ -44,7 +50,14 @@ func (u *UpdateService) Check() UpdateStatus {
 		if errors.Is(err, ErrGameRunning) {
 			status.Message = "Wyvencraft is running."
 		} else if errors.Is(err, ErrSignedOut) {
-			status.Message = "Sign in to check for updates."
+			// Two different situations, and telling them apart is the whole
+			// point: with a build on disk, being signed out costs updates and
+			// multiplayer. With none, it is the only thing in the way.
+			if status.Playable {
+				status.Message = "Playing offline. Sign in to check for updates."
+			} else {
+				status.Message = signInToDownload
+			}
 		} else {
 			status.Message = userMessage(err)
 		}
@@ -141,6 +154,11 @@ func (u *UpdateService) Install() string {
 
 	token, err := u.core.Session.AccessToken(ctx)
 	if err != nil {
+		if errors.Is(err, ErrSignedOut) {
+			// userMessage would surface the bare "not signed in", which says
+			// nothing about what to do or why this one action needs it.
+			return signInToDownload
+		}
 		return userMessage(err)
 	}
 

@@ -34,7 +34,7 @@
       // any longer than the request needs it.
       password = "";
       launcher.account = result.account ?? null;
-      launcher.route = "home";
+      launcher.home();
       void launcher.check();
     } finally {
       busy = false;
@@ -48,7 +48,7 @@
       <img class="mark" src="/logo.png" alt="" draggable="false" />
       <div>
         <h1>Wyvencraft</h1>
-        <p class="sub">Sign in to play</p>
+        <p class="sub">Sign in for downloads and multiplayer</p>
       </div>
     </div>
 
@@ -80,6 +80,11 @@
       {busy ? "Signing in…" : "Sign in"}
     </button>
 
+    <p class="aside">
+      An account is only needed to download the game and to play with other
+      people. Whatever is already installed plays offline without one.
+    </p>
+
     <footer>
       {#if server && !server.reachable}
         <span class="warn">{server.message}</span>
@@ -88,9 +93,14 @@
       {:else}
         <span>Checking the account server…</span>
       {/if}
-      <button class="ghost" type="button" onclick={() => (launcher.route = "settings")}>
-        Settings
-      </button>
+      <div class="links">
+        <button class="ghost" type="button" onclick={() => launcher.go("settings")}>
+          Settings
+        </button>
+        <button class="ghost" type="button" onclick={() => launcher.back()}>
+          ← Back
+        </button>
+      </div>
     </footer>
   </form>
 </div>
@@ -140,6 +150,12 @@
     font-size: 0.82rem;
     color: var(--muted);
   }
+  .aside {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: var(--faint);
+  }
   footer {
     display: flex;
     align-items: center;
@@ -148,6 +164,12 @@
     margin-top: var(--s-1);
     font-size: 0.78rem;
     color: var(--faint);
+  }
+  .links {
+    display: flex;
+    align-items: center;
+    gap: var(--s-1);
+    flex: none;
   }
   .warn { color: var(--bad); }
 </style>

@@ -22,6 +22,19 @@ updates.
                      WYVEN_DATA_DIR = <data>    (finds saves/)
 ```
 
+## Signing in is optional
+
+The launcher opens on the home screen whether or not anyone is signed in, and a
+build already on disk plays straight away. Playing signed out means singleplayer
+only — the game enforces that itself, greying out its Multiplayer button and
+refusing the connect path on the same `can_play_multiplayer` check.
+
+An account buys exactly two things: playing with other people, and downloading.
+The game repository is private and wcauthserver brokers every release download
+against the player's own token, so installing or updating a build is the one
+action that asks for a sign-in — and it says so on the button rather than
+failing after the click.
+
 ## On disk
 
 Everything lives under one root — `~/Library/Application Support/Wyvencraft`
@@ -115,18 +128,18 @@ WCL_DEV_GAME_DIR=/tmp/wc-devgame \
 
 ## Layout
 
-| Package | What it owns |
-| --- | --- |
-| `internal/paths` | The directory layout above. Must agree with the game's `src/paths.rs` |
-| `internal/profiles` | `profiles.json`: the profile list and the selection. Not `internal/profile` |
-| `internal/wcauth` | The account-server client: login, refresh, logout, keys, releases |
-| `internal/profile` | `profile.toml` and `authkeys.toml` — the handoff to the game |
-| `internal/install` | Asset selection, resumable download, checksum, unpack, prune |
-| `internal/selfupdate` | The launcher's own update: GitHub releases, staging, the swap |
-| `internal/version` | Which build this is, stamped in by the release workflow |
-| `internal/gamesvc` | Child environment, Vulkan discovery, spawn, stderr streaming |
-| `internal/markdown` | Release notes → HTML, with raw HTML dropped |
-| `internal/services` | The three objects the frontend calls, and the session rules |
+| Package               | What it owns                                                                |
+| --------------------- | --------------------------------------------------------------------------- |
+| `internal/paths`      | The directory layout above. Must agree with the game's `src/paths.rs`       |
+| `internal/profiles`   | `profiles.json`: the profile list and the selection. Not `internal/profile` |
+| `internal/wcauth`     | The account-server client: login, refresh, logout, keys, releases           |
+| `internal/profile`    | `profile.toml` and `authkeys.toml` — the handoff to the game                |
+| `internal/install`    | Asset selection, resumable download, checksum, unpack, prune                |
+| `internal/selfupdate` | The launcher's own update: GitHub releases, staging, the swap               |
+| `internal/version`    | Which build this is, stamped in by the release workflow                     |
+| `internal/gamesvc`    | Child environment, Vulkan discovery, spawn, stderr streaming                |
+| `internal/markdown`   | Release notes → HTML, with raw HTML dropped                                 |
+| `internal/services`   | The three objects the frontend calls, and the session rules                 |
 
 ## Updating the launcher itself
 
@@ -167,14 +180,14 @@ never offers to update itself.
 
 Six repository secrets, all macOS signing:
 
-| Secret | What |
-| --- | --- |
-| `MACOS_CERT_P12` | base64 of the exported Developer ID Application `.p12` |
-| `MACOS_CERT_PASSWORD` | its export password |
-| `MACOS_SIGN_IDENTITY` | `Developer ID Application: … (S6EF64ZEMD)` |
-| `APPLE_API_KEY_P8` | base64 of the App Store Connect `.p8` |
-| `APPLE_API_KEY_ID` | that key's id |
-| `APPLE_API_ISSUER_ID` | the issuer id |
+| Secret                | What                                                   |
+| --------------------- | ------------------------------------------------------ |
+| `MACOS_CERT_P12`      | base64 of the exported Developer ID Application `.p12` |
+| `MACOS_CERT_PASSWORD` | its export password                                    |
+| `MACOS_SIGN_IDENTITY` | `Developer ID Application: … (S6EF64ZEMD)`             |
+| `APPLE_API_KEY_P8`    | base64 of the App Store Connect `.p8`                  |
+| `APPLE_API_KEY_ID`    | that key's id                                          |
+| `APPLE_API_ISSUER_ID` | the issuer id                                          |
 
 The workflow runs only on `release: published` and `workflow_dispatch`, both of
 which execute in this repository's own context. **Do not add a `pull_request`
