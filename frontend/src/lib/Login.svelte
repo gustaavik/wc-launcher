@@ -45,7 +45,7 @@
 <div class="wrap">
   <form class="card panel" onsubmit={submit}>
     <div class="brand">
-      <div class="mark" aria-hidden="true"></div>
+      <img class="mark" src="/logo.png" alt="" draggable="false" />
       <div>
         <h1>Wyvencraft</h1>
         <p class="sub">Sign in to play</p>
@@ -118,9 +118,10 @@
   .mark {
     width: 40px;
     height: 40px;
-    border-radius: 9px;
-    background: var(--grad);
+    display: block;
+    object-fit: contain;
     flex: none;
+    -webkit-user-drag: none;
   }
   h1 {
     margin: 0;

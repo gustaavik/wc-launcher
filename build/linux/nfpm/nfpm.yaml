@@ -20,7 +20,7 @@ contents:
   - src: "./bin/Wyvencraft"
     dst: "/usr/local/bin/Wyvencraft"
   - src: "./build/appicon.png"
-    dst: "/usr/share/icons/hicolor/128x128/apps/Wyvencraft.png"
+    dst: "/usr/share/icons/hicolor/512x512/apps/Wyvencraft.png"
   - src: "./build/linux/Wyvencraft.desktop"
     dst: "/usr/share/applications/Wyvencraft.desktop"
 
