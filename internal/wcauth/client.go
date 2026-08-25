@@ -26,7 +26,7 @@ import (
 // DefaultURL is the deployment the shipped game is built against — the game's
 // release workflow bakes this same value in as WYVEN_AUTH_URL. Not localhost:
 // that is a development default, and a player has no auth server of their own.
-const DefaultURL = "http://llzdmervhd2eyewlrapa8jhi.100.94.237.98.sslip.io"
+const DefaultURL = "https://auth.wyvencraft.com"
 
 // requestTimeout bounds any single call. The server's own timeout layer cuts
 // requests off at 30s; there is no point waiting longer than it will answer.
