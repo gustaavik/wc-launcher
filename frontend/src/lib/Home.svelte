@@ -24,7 +24,10 @@
   });
 
   function press() {
-    if (action.kind === "play") void launcher.play();
+    // Installing needs an account, so the button offers the sign-in instead of
+    // a download that would be refused.
+    if (action.kind === "signin") launcher.go("login");
+    else if (action.kind === "play") void launcher.play();
     // A required update is one action, not two: the Latest profile does not
     // offer the old build to fall back on, so there is nothing to stop for.
     else if (action.kind === "update") void launcher.updateAndPlay();
@@ -41,17 +44,29 @@
     <div class="who">
       {#if launcher.account}
         <span class="name">{launcher.account.username}</span>
+      {:else}
+        <span class="name offline">Playing offline</span>
       {/if}
-      <button class="ghost" onclick={() => (launcher.route = "settings")}
+      <button class="ghost" onclick={() => launcher.go("settings")}
         >Settings</button
       >
-      <button
-        class="ghost"
-        onclick={() => launcher.signOut()}
-        disabled={launcher.game.running}
-      >
-        Sign out
-      </button>
+      {#if launcher.account}
+        <button
+          class="ghost"
+          onclick={() => launcher.signOut()}
+          disabled={launcher.game.running}
+        >
+          Sign out
+        </button>
+      {:else}
+        <button
+          class="ghost"
+          onclick={() => launcher.go("login")}
+          disabled={launcher.game.running}
+        >
+          Sign in
+        </button>
+      {/if}
     </div>
   </header>
 
@@ -186,6 +201,9 @@
   .name {
     color: var(--muted);
     margin-right: 0.4rem;
+  }
+  .name.offline {
+    color: var(--faint);
   }
 
   main {

@@ -211,6 +211,10 @@ export interface SettingsView {
  * 	Latest      v3        unknown     Play            (offline: never forced)
  * 	pinned v2   v2        v4          Play
  * 	pinned v2   —         v4          Install
+ * 
+ * Signed out, "published" is always unknown, so a build on disk means Play and
+ * no build means the player is asked to sign in — downloading is the one thing
+ * an account is needed for.
  */
 export interface UpdateStatus {
     /**

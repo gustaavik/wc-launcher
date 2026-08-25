@@ -18,7 +18,7 @@
 <div class="picker panel">
   <div class="head">
     <span class="key">Profile</span>
-    <button class="ghost" onclick={() => (launcher.route = "profiles")}
+    <button class="ghost" onclick={() => launcher.go("profiles")}
       >Manage…</button
     >
   </div>
