@@ -30,7 +30,7 @@ otherwise:
 
 ```
 launcher.json      launcher settings (account server, log filter)
-installed.json     which build is installed
+profiles.json      the player's profiles, and which one is selected
 versions/<tag>/    an installed build: the wyvencraft binary plus assets/
 data/              the game's WYVEN_DATA_DIR
   saves/  profile.toml  authkeys.toml  ops.toml
@@ -42,6 +42,27 @@ launcher-update/   a downloaded launcher, until it replaces the running one
 whole version directory, so nothing that must survive one may live inside it.
 The game agrees with this layout — its `src/paths.rs` resolves the same default,
 so starting it by hand finds the same worlds.
+
+There is no index of what is installed. `versions/` *is* the record: each build
+carries a `.wyvencraft-tag` file naming the release it came from, because the
+directory name is a sanitised tag and that sanitising is lossy. A build removed
+by hand simply stops being listed, with nothing left to fall out of sync.
+
+## Profiles
+
+A profile is a name bound to a version. **Latest** is built in, is the default,
+and cannot be renamed or deleted — it always runs the newest release, and while
+it is selected the launcher will not start an older build: the Play button
+becomes **Update & Play** until the newest one is installed.
+
+That force is deliberately gated on *knowing*. If the account server cannot be
+reached, the newest release is unknown, and an unknown release must never become
+a locked door — an offline player still gets to play the build they have.
+
+Any other profile is pinned to one release and never updates itself. All
+profiles share the same `data/`, so saves are common to all of them: a profile
+chooses a build, not a world. A pinned build is never deleted to make room for a
+newer one, and deleting a profile leaves its build on disk.
 
 ## Running it
 
@@ -97,9 +118,10 @@ WCL_DEV_GAME_DIR=/tmp/wc-devgame \
 | Package | What it owns |
 | --- | --- |
 | `internal/paths` | The directory layout above. Must agree with the game's `src/paths.rs` |
+| `internal/profiles` | `profiles.json`: the profile list and the selection. Not `internal/profile` |
 | `internal/wcauth` | The account-server client: login, refresh, logout, keys, releases |
 | `internal/profile` | `profile.toml` and `authkeys.toml` — the handoff to the game |
-| `internal/install` | Asset selection, resumable download, checksum, unpack |
+| `internal/install` | Asset selection, resumable download, checksum, unpack, prune |
 | `internal/selfupdate` | The launcher's own update: GitHub releases, staging, the swap |
 | `internal/version` | Which build this is, stamped in by the release workflow |
 | `internal/gamesvc` | Child environment, Vulkan discovery, spawn, stderr streaming |

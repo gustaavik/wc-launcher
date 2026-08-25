@@ -3,10 +3,12 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 
 	"github.com/gustaavik/wc-launcher/internal/gamesvc"
+	"github.com/gustaavik/wc-launcher/internal/install"
 )
 
 // devGameDirVar points the launcher at a locally built game instead of a
@@ -98,8 +100,8 @@ func (g *GameService) Status() GameStatus { return g.core.Runner.Status() }
 // LogPath is where the last run's output was written, for a "reveal" button.
 func (g *GameService) LogPath() string { return g.core.Layout.GameLog() }
 
-// versionDir is the install to launch: the dev override if set, otherwise the
-// recorded one.
+// versionDir is the install to launch: the dev override if set, otherwise
+// whatever the selected profile resolves to.
 func (g *GameService) versionDir() (string, error) {
 	if dev := strings.TrimSpace(os.Getenv(devGameDirVar)); dev != "" {
 		if _, err := os.Stat(dev); err != nil {
@@ -107,10 +109,42 @@ func (g *GameService) versionDir() (string, error) {
 		}
 		return dev, nil
 	}
+	return g.launchPlan()
+}
 
-	state := g.core.Install.State()
-	if state.Tag == "" || !g.core.Install.Installed(state.Tag) {
+// launchPlan is the build the selected profile would run, or why it may not.
+//
+// This is where the forced update is enforced, rather than only in the UI.
+// Wails methods are callable from devtools and profiles.json is an ordinary
+// file, so a disabled button is a presentation choice and not a rule.
+func (g *GameService) launchPlan() (string, error) {
+	profile := g.core.Profiles.Selected()
+
+	if !profile.IsLatest() {
+		if !g.core.Install.Installed(profile.Tag) {
+			return "", fmt.Errorf("%q is pinned to %s, which is not installed yet",
+				profile.Name, profile.Tag)
+		}
+		return g.core.Layout.VersionDir(profile.Tag), nil
+	}
+
+	// Latest runs the newest build on disk — unless a newer one is known to be
+	// published, which is precisely what this profile promises not to do.
+	builds := g.core.Install.List()
+	if len(builds) == 0 {
 		return "", errors.New("no game installed yet")
 	}
-	return g.core.Layout.VersionDir(state.Tag), nil
+	newest := builds[0].Tag
+
+	// Gated on knowing, not on guessing. An unreachable account server leaves
+	// this unknown, and an unknown release must not become a locked door.
+	if latest, ok := g.core.knownLatest(); ok && latest.Tag != newest {
+		// And only when that release has something this platform can install:
+		// a build nobody here could run is not an update being refused.
+		if _, err := install.SelectAsset(latest); err == nil {
+			return "", fmt.Errorf("%s is out, and the Latest profile always runs the newest build. Update to play.",
+				latest.Tag)
+		}
+	}
+	return g.core.Layout.VersionDir(newest), nil
 }

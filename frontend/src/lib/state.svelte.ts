@@ -4,11 +4,11 @@
 // object's worth of state, and the components that read it all read most of it.
 
 import { Events } from "@wailsio/runtime";
-import { AuthService, GameService, UpdateService } from "../../bindings/github.com/gustaavik/wc-launcher/internal/services";
-import type { AccountView, GameStatus, LauncherStatus, UpdateStatus } from "../../bindings/github.com/gustaavik/wc-launcher/internal/services";
-import type { Progress } from "../../bindings/github.com/gustaavik/wc-launcher/internal/install";
+import { AuthService, GameService, ProfileService, UpdateService } from "../../bindings/github.com/gustaavik/wc-launcher/internal/services";
+import type { AccountView, GameStatus, LauncherStatus, ProfileView, ReleaseOption, UpdateStatus } from "../../bindings/github.com/gustaavik/wc-launcher/internal/services";
+import type { Build, Progress } from "../../bindings/github.com/gustaavik/wc-launcher/internal/install";
 
-export type Route = "loading" | "login" | "home" | "settings";
+export type Route = "loading" | "login" | "home" | "settings" | "profiles";
 
 /** How many log lines to keep. Enough to see a startup failure, bounded so a
  *  chatty RUST_LOG cannot grow the page without limit. */
@@ -21,6 +21,17 @@ class LauncherState {
     update = $state<UpdateStatus | null>(null);
     progress = $state<Progress | null>(null);
     installing = $state(false);
+
+    /** The player's profiles, Latest first. */
+    profiles = $state<ProfileView[]>([]);
+    selectedProfile = $state<string>("latest");
+    /** Versions a profile can be pinned to. Null until first fetched, which is
+     *  how the editor tells "not loaded yet" from "the server has none". */
+    releases = $state<ReleaseOption[] | null>(null);
+    builds = $state<Build[]>([]);
+    /** Shown on the profiles screen, separate from the home banner. */
+    profileError = $state("");
+    profileBusy = $state(false);
 
     /** The launcher's own update. Independent of the game's: it comes from
      *  GitHub rather than the account server, and works signed out. */
@@ -44,6 +55,11 @@ class LauncherState {
         return this.account !== null;
     }
 
+    /** The selected profile, or null before the first load. */
+    get profile(): ProfileView | null {
+        return this.profiles.find((p) => p.id === this.selectedProfile) ?? null;
+    }
+
     /** Whether to show the launcher-update strip at all. */
     get selfUpdateVisible(): boolean {
         const status = this.selfUpdate;
@@ -59,10 +75,23 @@ class LauncherState {
         const status = this.update;
         if (!status) return { label: "Checking…", kind: "none", enabled: false };
         if (!status.supported) return { label: "Unavailable", kind: "none", enabled: false };
-        if (!status.installedTag) return { label: "Install", kind: "install", enabled: true };
-        if (status.updateAvailable) return { label: "Update", kind: "update", enabled: true };
+
+        if (status.updateAvailable) {
+            // Required means the Latest profile: it promises the newest build,
+            // so the older one is not a fallback to keep playing while this is
+            // declined. Update and launch become one action rather than two.
+            if (status.required) return { label: "Update & Play", kind: "update", enabled: true };
+            return { label: status.installedTag ? "Update" : "Install", kind: "install", enabled: true };
+        }
         if (status.playable) return { label: "Play", kind: "play", enabled: true };
         return { label: "Install", kind: "install", enabled: true };
+    }
+
+    /** Why Play is not on offer, when that is not self-evident. */
+    get blockedReason(): string {
+        return this.update?.required
+            ? "Play is unavailable until Wyvencraft is up to date."
+            : "";
     }
 
     /** Wire up the Go events. Called once, from App. */
@@ -108,7 +137,11 @@ class LauncherState {
         // screen rather than swallowed — the player needs to know which it was.
         if (result.error) this.banner = result.error;
         this.route = this.account ? "home" : "login";
-        if (this.account) void this.check();
+        if (this.account) {
+            // Before check(), which reports on whichever profile is selected.
+            await this.loadProfiles();
+            void this.check();
+        }
         // Not gated on being signed in: updating the launcher needs no account,
         // and a launcher too old to sign in is exactly the one that must be
         // able to replace itself.
@@ -139,6 +172,81 @@ class LauncherState {
 
     cancelInstall() {
         void UpdateService.Cancel();
+    }
+
+    /** One click: fetch the build the profile needs, then start it.
+     *
+     *  The Latest profile forces the update, so making the player press twice
+     *  would only be ceremony. Never launches onto a failed install. */
+    async updateAndPlay() {
+        await this.install();
+        if (this.banner) return;
+        if (this.update?.playable) await this.play();
+    }
+
+    // ---------------------------------------------------------- profiles
+
+    /** Apply the result every profile mutator returns. */
+    private applyProfiles(result: { profiles: ProfileView[] | null; selected: string; error: string }) {
+        this.profiles = result.profiles ?? [];
+        this.selectedProfile = result.selected;
+        this.profileError = result.error;
+        return !result.error;
+    }
+
+    async loadProfiles() {
+        this.applyProfiles(await ProfileService.List());
+    }
+
+    /** Switch profile, then re-check: the entire Play button is derived from
+     *  which profile is selected. */
+    async selectProfile(id: string) {
+        if (id === this.selectedProfile) return;
+        this.applyProfiles(await ProfileService.Select(id));
+        await this.check();
+    }
+
+    async createProfile(name: string, tag: string): Promise<boolean> {
+        return this.profileCall(() => ProfileService.Create(name, tag));
+    }
+
+    async renameProfile(id: string, name: string): Promise<boolean> {
+        return this.profileCall(() => ProfileService.Rename(id, name));
+    }
+
+    async retagProfile(id: string, tag: string): Promise<boolean> {
+        return this.profileCall(() => ProfileService.Retag(id, tag));
+    }
+
+    async deleteProfile(id: string): Promise<boolean> {
+        return this.profileCall(() => ProfileService.Delete(id));
+    }
+
+    /** Run a mutator, refresh what depends on it, and report success. */
+    private async profileCall(call: () => Promise<{ profiles: ProfileView[] | null; selected: string; error: string }>) {
+        this.profileBusy = true;
+        try {
+            const ok = this.applyProfiles(await call());
+            if (ok) {
+                // A mutation can change what the selected profile needs, and
+                // which builds are still pinned.
+                await this.check();
+                await this.loadBuilds();
+            }
+            return ok;
+        } finally {
+            this.profileBusy = false;
+        }
+    }
+
+    async loadReleases() {
+        const result = await ProfileService.Releases();
+        this.releases = result.releases ?? [];
+        if (result.error) this.profileError = result.error;
+    }
+
+    async loadBuilds() {
+        this.builds = (await ProfileService.Builds()) ?? [];
     }
 
     async checkSelf() {
@@ -190,6 +298,11 @@ class LauncherState {
         }
         this.account = null;
         this.update = null;
+        // The release list and the profiles' installed flags were read with
+        // this account's token; keeping them would show stale answers to
+        // whoever signs in next.
+        this.releases = null;
+        this.profileError = "";
         this.route = "login";
     }
 }

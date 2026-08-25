@@ -134,6 +134,10 @@ func (a *AuthService) SaveSettings(authURL, logFilter string) LoginResult {
 	a.core.Client = client
 	a.core.Session.SetClient(client)
 	a.core.Install = newInstaller(a.core)
+	// A different server has a different release list, and the cached "newest
+	// release" is what the Latest profile is measured against. Keeping it would
+	// force an update to a tag the new server has never heard of.
+	a.core.setKnownLatest(nil)
 	a.core.emit("auth:changed", nil)
 
 	// The stored token belongs to the old server.
