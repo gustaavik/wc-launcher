@@ -14,7 +14,7 @@
 
 {#if launcher.route === "loading"}
   <div class="splash">
-    <div class="mark" aria-hidden="true"></div>
+    <img class="mark" src="/logo.png" alt="" draggable="false" />
     <p>Starting…</p>
   </div>
 {:else if launcher.route === "login"}
@@ -41,8 +41,9 @@
   .mark {
     width: 44px;
     height: 44px;
-    border-radius: 10px;
-    background: var(--grad);
+    display: block;
+    object-fit: contain;
+    -webkit-user-drag: none;
     animation: pulse 1.6s ease-in-out infinite;
   }
   @keyframes pulse {

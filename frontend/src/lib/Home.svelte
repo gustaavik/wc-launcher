@@ -35,7 +35,7 @@
 <div class="shell">
   <header>
     <div class="brand">
-      <div class="mark" aria-hidden="true"></div>
+      <img class="mark" src="/logo.png" alt="" draggable="false" />
       <strong>Wyvencraft</strong>
     </div>
     <div class="who">
@@ -171,8 +171,11 @@
   .mark {
     width: 22px;
     height: 22px;
-    border-radius: 6px;
-    background: var(--grad);
+    display: block;
+    object-fit: contain;
+    /* The header is a window-drag region; without this the webview starts an
+       image drag instead of moving the window. */
+    -webkit-user-drag: none;
   }
   .who {
     display: flex;
