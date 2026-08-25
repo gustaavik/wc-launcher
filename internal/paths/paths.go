@@ -4,6 +4,7 @@
 //
 //	<app-data>/Wyvencraft/
 //	  launcher.json      launcher settings
+//	  profiles.json      the player's profiles, and which one is selected
 //	  versions/<tag>/    an installed game build: the binary plus assets/
 //	  data/              the game's WYVEN_DATA_DIR: saves, profile.toml, ...
 //	  logs/              launcher.log, game.log
@@ -70,8 +71,19 @@ func New() (Layout, error) {
 // SettingsFile is where launcher.json lives.
 func (l Layout) SettingsFile() string { return filepath.Join(l.Root, "launcher.json") }
 
-// StateFile records which version is installed.
+// StateFile is the old single-install record.
+//
+// Nothing writes it any more: which build is installed is answered by scanning
+// versions/, and which build to launch is a per-profile question. Kept only so
+// the launcher has a name for the file it deletes on first run.
 func (l Layout) StateFile() string { return filepath.Join(l.Root, "installed.json") }
+
+// ProfilesFile is where the player's launcher profiles live.
+//
+// Deliberately not a key in launcher.json: settings are written wholesale by
+// the settings screen, profiles are written one mutation at a time from the
+// home screen, and one file with two owners is a lost update waiting to happen.
+func (l Layout) ProfilesFile() string { return filepath.Join(l.Root, "profiles.json") }
 
 // VersionDir is the install directory for one release tag. It becomes the
 // game's working directory, which is how the game finds assets/.

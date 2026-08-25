@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import Home from "./lib/Home.svelte";
   import Login from "./lib/Login.svelte";
+  import Profiles from "./lib/Profiles.svelte";
   import Settings from "./lib/Settings.svelte";
   import { launcher } from "./lib/state.svelte";
 
@@ -20,6 +21,8 @@
   <Login />
 {:else if launcher.route === "settings"}
   <Settings />
+{:else if launcher.route === "profiles"}
+  <Profiles />
 {:else}
   <Home />
 {/if}
@@ -43,10 +46,17 @@
     animation: pulse 1.6s ease-in-out infinite;
   }
   @keyframes pulse {
-    0%, 100% { opacity: 0.45; }
-    50% { opacity: 1; }
+    0%,
+    100% {
+      opacity: 0.45;
+    }
+    50% {
+      opacity: 1;
+    }
   }
   @media (prefers-reduced-motion: reduce) {
-    .mark { animation: none; }
+    .mark {
+      animation: none;
+    }
   }
 </style>

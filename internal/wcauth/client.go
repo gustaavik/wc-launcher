@@ -179,6 +179,10 @@ func (a Asset) SHA256() string {
 	return strings.ToLower(strings.TrimPrefix(a.Digest, "sha256:"))
 }
 
+type releaseListResponse struct {
+	Releases []Release `json:"releases"`
+}
+
 type downloadResponse struct {
 	URL string `json:"url"`
 }
@@ -234,6 +238,21 @@ func (c *Client) LatestRelease(ctx context.Context, accessToken string) (Release
 	return out, err
 }
 
+// Releases lists every published build, newest first.
+//
+// The version picker's source, and how a profile pinned to an older tag finds
+// the assets to install with. A launcher that only ever installs the newest
+// build does not need this; one that lets a player pin does.
+//
+// Unlike LatestRelease, this includes prereleases: /releases/latest follows the
+// repository's stable-release pointer, so the newest entry here is occasionally
+// newer than that. Callers show the Prerelease flag rather than hiding them.
+func (c *Client) Releases(ctx context.Context, accessToken string) ([]Release, error) {
+	var out releaseListResponse
+	err := c.do(ctx, http.MethodGet, "/api/v1/releases", accessToken, nil, &out)
+	return out.Releases, err
+}
+
 // DownloadURL resolves where one asset can be fetched from.
 //
 // The URL is short-lived and carries its own authorization. Use it at once and
@@ -256,9 +275,12 @@ type envelope struct {
 	Code    string          `json:"code"`
 }
 
-// maxBody caps what will be read from a response. Every endpoint here returns a
-// small JSON object; a release's notes are the largest, and nowhere near this.
-const maxBody = 1 << 20
+// maxBody caps what will be read from a response.
+//
+// Sized for the release list, which is the only large body here: thirty
+// releases (the server's ListReleases::LIMIT), each carrying its own Markdown
+// notes. Everything else is a small JSON object.
+const maxBody = 4 << 20
 
 func (c *Client) do(ctx context.Context, method, path, bearer string, in, out any) error {
 	var body io.Reader

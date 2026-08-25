@@ -78,6 +78,77 @@ export interface LoginResult {
 }
 
 /**
+ * ProfileList is the whole list plus the selection.
+ * 
+ * Every mutator returns one, so the frontend never has to reconcile a partial
+ * update against what it already had.
+ */
+export interface ProfileList {
+    "profiles": ProfileView[] | null;
+    "selected": string;
+
+    /**
+     * Error is empty on success, matching LoginResult: a Go error crossing the
+     * binding would arrive as a thrown exception the UI has to catch.
+     */
+    "error": string;
+}
+
+/**
+ * ProfileView is one launcher profile, ready to display.
+ */
+export interface ProfileView {
+    "id": string;
+    "name": string;
+
+    /**
+     * Tag is the release this profile is pinned to. Empty for Latest, which
+     * follows whatever is newest rather than pinning anything.
+     */
+    "tag": string;
+
+    /**
+     * Latest is true for the built-in profile: it cannot be renamed, retagged
+     * or deleted, and it forces an update when a newer build is published.
+     */
+    "latest": boolean;
+
+    /**
+     * Installed is true when this profile has a build on disk it could run.
+     */
+    "installed": boolean;
+}
+
+/**
+ * ReleaseList is what the version picker shows.
+ */
+export interface ReleaseList {
+    "releases": ReleaseOption[] | null;
+    "error": string;
+}
+
+/**
+ * ReleaseOption is one entry in the version picker.
+ * 
+ * Deliberately without rendered notes: the picker shows a list, and rendering
+ * thirty changelogs to fill a dropdown is work nobody asked for.
+ */
+export interface ReleaseOption {
+    "tag": string;
+    "name": string;
+    "publishedAt": string;
+    "prerelease": boolean;
+
+    /**
+     * Supported is false when this release publishes no build for this
+     * platform, so the picker can grey it out rather than offer a pin that can
+     * never install.
+     */
+    "supported": boolean;
+    "installed": boolean;
+}
+
+/**
  * ReleaseView is a release, ready to display.
  */
 export interface ReleaseView {
@@ -130,30 +201,67 @@ export interface SettingsView {
 
 /**
  * UpdateStatus is everything the Play button needs to decide what it says.
+ * 
+ * The truth table it has to produce:
+ * 
+ * 	profile     on disk   published   result
+ * 	Latest      —         v4          Install
+ * 	Latest      v4        v4          Play
+ * 	Latest      v3        v4          Update & Play   (Required)
+ * 	Latest      v3        unknown     Play            (offline: never forced)
+ * 	pinned v2   v2        v4          Play
+ * 	pinned v2   —         v4          Install
  */
 export interface UpdateStatus {
     /**
-     * InstalledTag is "" when nothing is installed yet.
+     * Profile is the selection, so the UI never has to join two calls.
+     */
+    "profile": ProfileView;
+
+    /**
+     * InstalledTag is the build the selected profile would launch, "" when it
+     * has none. For Latest that is the newest build on disk; for a pinned
+     * profile it is its own tag, or "" if that build is not installed.
      */
     "installedTag": string;
 
     /**
-     * Latest is nil when the check could not be made.
+     * Latest is the newest published release, nil when the check could not be
+     * made. Reported even for a pinned profile: the sidebar shows it.
      */
     "latest": ReleaseView | null;
 
     /**
-     * UpdateAvailable is true when a different version is published.
+     * Target is the release the selected profile wants. Nil when it could not
+     * be resolved. Carries the notes, so the changelog pane can show the
+     * profile's own changelog rather than always the newest one.
+     */
+    "target": ReleaseView | null;
+
+    /**
+     * UpdateAvailable is true when Target is published and not installed.
      */
     "updateAvailable": boolean;
 
     /**
-     * Playable is true when there is something installed to run.
+     * Required is true when the update cannot be deferred: the Latest profile
+     * is a promise to run the newest build, so an older one is not a fallback
+     * the player gets to choose.
+     * 
+     * False whenever the newest release is unknown. An update that cannot be
+     * checked for must not become a lockout — a player who cannot reach the
+     * account server still gets to play the build they have.
+     */
+    "required": boolean;
+
+    /**
+     * Playable is true when there is a build this profile may run right now.
+     * False under a required update, which is what makes the force real.
      */
     "playable": boolean;
 
     /**
-     * Supported is false when the release has no build for this platform.
+     * Supported is false when Target has no build for this platform.
      */
     "supported": boolean;
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import LauncherUpdate from "./LauncherUpdate.svelte";
+  import ProfilePicker from "./ProfilePicker.svelte";
   import ProgressPanel from "./ProgressPanel.svelte";
   import { shortDate } from "./format";
   import { launcher } from "./state.svelte";
@@ -8,7 +9,11 @@
   let logEl = $state<HTMLPreElement | null>(null);
 
   const action = $derived(launcher.action);
-  const latest = $derived(launcher.update?.latest ?? null);
+  // The profile's own release when it has one, so a pinned profile shows the
+  // changelog for the build it actually runs. Falls back to the newest.
+  const latest = $derived(
+    launcher.update?.target ?? launcher.update?.latest ?? null,
+  );
   const progress = $derived(launcher.progress);
 
   // Follow the tail while the game runs, so a startup failure is the thing on
@@ -20,6 +25,9 @@
 
   function press() {
     if (action.kind === "play") void launcher.play();
+    // A required update is one action, not two: the Latest profile does not
+    // offer the old build to fall back on, so there is nothing to stop for.
+    else if (action.kind === "update") void launcher.updateAndPlay();
     else void launcher.install();
   }
 </script>
@@ -34,8 +42,14 @@
       {#if launcher.account}
         <span class="name">{launcher.account.username}</span>
       {/if}
-      <button class="ghost" onclick={() => (launcher.route = "settings")}>Settings</button>
-      <button class="ghost" onclick={() => launcher.signOut()} disabled={launcher.game.running}>
+      <button class="ghost" onclick={() => (launcher.route = "settings")}
+        >Settings</button
+      >
+      <button
+        class="ghost"
+        onclick={() => launcher.signOut()}
+        disabled={launcher.game.running}
+      >
         Sign out
       </button>
     </div>
@@ -69,14 +83,24 @@
 
       <LauncherUpdate />
 
+      <ProfilePicker />
+
       <div class="versions panel">
         <div class="row">
           <span class="key">Installed</span>
           <span class="val">{launcher.update?.installedTag || "—"}</span>
         </div>
         <div class="row">
-          <span class="key">Latest</span>
-          <span class="val">{latest?.tag || "—"}</span>
+          <span class="key"
+            >{launcher.profile && !launcher.profile.latest
+              ? "Pinned to"
+              : "Latest"}</span
+          >
+          <span class="val"
+            >{launcher.update?.target?.tag ??
+              launcher.update?.latest?.tag ??
+              "—"}</span
+          >
         </div>
         {#if launcher.update?.message}
           <p class="dim small">{launcher.update.message}</p>
@@ -90,6 +114,9 @@
       <button class="primary big" onclick={press} disabled={!action.enabled}>
         {action.label}
       </button>
+      {#if launcher.blockedReason}
+        <p class="dim small blocked">{launcher.blockedReason}</p>
+      {/if}
 
       <div class="tools">
         <button
@@ -104,7 +131,8 @@
           Check for updates
         </button>
         {#if launcher.game.running}
-          <button class="ghost" onclick={() => launcher.stopGame()}>Stop</button>
+          <button class="ghost" onclick={() => launcher.stopGame()}>Stop</button
+          >
         {/if}
         <button class="ghost" onclick={() => (showLog = !showLog)}>
           {showLog ? "Hide log" : "Show log"}
@@ -112,7 +140,8 @@
       </div>
 
       {#if showLog}
-        <pre class="logbox panel" bind:this={logEl}>{launcher.log.join("\n") || "No output yet."}</pre>
+        <pre class="logbox panel" bind:this={logEl}>{launcher.log.join("\n") ||
+            "No output yet."}</pre>
       {/if}
     </aside>
   </main>
@@ -134,15 +163,27 @@
     border-bottom: 1px solid var(--border);
     flex: none;
   }
-  .brand { display: flex; align-items: center; gap: 0.6rem; }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
   .mark {
     width: 22px;
     height: 22px;
     border-radius: 6px;
     background: var(--grad);
   }
-  .who { display: flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; }
-  .name { color: var(--muted); margin-right: 0.4rem; }
+  .who {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.85rem;
+  }
+  .name {
+    color: var(--muted);
+    margin-right: 0.4rem;
+  }
 
   main {
     flex: 1;
@@ -153,7 +194,11 @@
     padding: var(--s-3);
   }
 
-  .notes { display: flex; flex-direction: column; min-height: 0; }
+  .notes {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
   .notes-head {
     display: flex;
     align-items: baseline;
@@ -163,9 +208,18 @@
     border-bottom: 1px solid var(--border);
     flex: none;
   }
-  .notes-head h2 { margin: 0; font-size: 1rem; }
-  .date { color: var(--faint); font-size: 0.78rem; }
-  .notes-body { overflow-y: auto; padding: var(--s-3); }
+  .notes-head h2 {
+    margin: 0;
+    font-size: 1rem;
+  }
+  .date {
+    color: var(--faint);
+    font-size: 0.78rem;
+  }
+  .notes-body {
+    overflow-y: auto;
+    padding: var(--s-3);
+  }
 
   .side {
     display: flex;
@@ -174,13 +228,34 @@
     min-height: 0;
   }
 
-  .versions { padding: var(--s-2); display: flex; flex-direction: column; gap: 0.4rem; }
-  .row { display: flex; justify-content: space-between; font-size: 0.85rem; }
-  .key { color: var(--muted); }
-  .val { font-variant-numeric: tabular-nums; }
+  .versions {
+    padding: var(--s-2);
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+  }
+  .key {
+    color: var(--muted);
+  }
+  .val {
+    font-variant-numeric: tabular-nums;
+  }
 
-  .big { padding: 0.8rem; font-size: 1rem; }
-  .tools { display: flex; flex-wrap: wrap; gap: 0.25rem; font-size: 0.8rem; }
+  .big {
+    padding: 0.8rem;
+    font-size: 1rem;
+  }
+  .tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    font-size: 0.8rem;
+  }
 
   .logbox {
     flex: 1;
@@ -196,6 +271,17 @@
     overflow-wrap: anywhere;
   }
 
-  .dim { color: var(--faint); }
-  .small { font-size: 0.78rem; margin: 0.2rem 0 0; }
+  .dim {
+    color: var(--faint);
+  }
+  .small {
+    font-size: 0.78rem;
+    margin: 0.2rem 0 0;
+  }
+  /* Sits directly under the big button and explains it, so it reads as part of
+     the same control rather than as another status line. */
+  .blocked {
+    text-align: center;
+    line-height: 1.5;
+  }
 </style>
