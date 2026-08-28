@@ -1,0 +1,135 @@
+name: Mirror MoltenVK
+
+# Repackages a KhronosGroup/MoltenVK release into the slim archive the launcher
+# downloads, and publishes it under its own tag.
+#
+# Why mirror at all: upstream ships MoltenVK-macos.tar, 60 MB of headers and a
+# static library wrapped around a 10 MB dylib. The launcher needs the dylib and
+# the licence and nothing else, which compresses to about 3 MB. Making every
+# player download the other 57 MB to throw it away is the opposite of the point.
+#
+# The tag is deps/moltenvk-<version>, deliberately unrelated to launcher
+# releases: the driver is pinned by internal/deps and changes on its own
+# schedule, so a launcher release must never have to re-attach it.
+#
+# After a run, paste the values it prints into internal/deps/deps.go. The pin is
+# what makes the download safe, so it is checked in rather than discovered at
+# runtime, and the launcher refuses to install a driver with no checksum.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "MoltenVK version, without the leading v"
+        required: true
+        default: "1.4.2"
+      upstream_sha256:
+        description: "sha256 of the upstream MoltenVK-macos.tar (GitHub publishes it on the release)"
+        required: true
+        default: f95765a6229cb7b915990a2890ce12ebe36a730b021545d3d52ae69ce4c4024e
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    name: moltenvk-${{ inputs.version }}
+    # macOS, for lipo and codesign: the checks below are the whole value of
+    # this job, and neither tool exists on a Linux runner.
+    runs-on: macos-latest
+    steps:
+      - name: Fetch and verify the upstream release
+        env:
+          VERSION: ${{ inputs.version }}
+          UPSTREAM_SHA256: ${{ inputs.upstream_sha256 }}
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -o MoltenVK-macos.tar \
+            "https://github.com/KhronosGroup/MoltenVK/releases/download/v${VERSION}/MoltenVK-macos.tar"
+          echo "${UPSTREAM_SHA256}  MoltenVK-macos.tar" | shasum -a 256 -c -
+
+      - name: Take the dylib and the licence
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p upstream "stage/moltenvk-${VERSION}"
+          tar -xf MoltenVK-macos.tar -C upstream
+
+          # Found rather than hardcoded: the archive carries a
+          # MoltenVK/MoltenVK/dylib -> dynamic/dylib symlink and the layout has
+          # moved between releases. -type f skips the symlinked duplicate.
+          DYLIB=$(find upstream -type f -path '*dylib*macOS*' -name libMoltenVK.dylib | head -1)
+          if [ -z "$DYLIB" ]; then
+            echo "no dynamic libMoltenVK.dylib in the upstream archive" >&2
+            exit 1
+          fi
+          cp "$DYLIB" "stage/moltenvk-${VERSION}/"
+          # Apache 2.0: redistributing the dylib means redistributing this.
+          cp upstream/MoltenVK/LICENSE "stage/moltenvk-${VERSION}/"
+
+      - name: Check the dylib runs everywhere and is signed
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          DYLIB="stage/moltenvk-${VERSION}/libMoltenVK.dylib"
+
+          # A single-architecture mirror would silently break half the Macs,
+          # and nothing later in this job would notice.
+          lipo -info "$DYLIB"
+          lipo -info "$DYLIB" | grep -q "x86_64 arm64"
+
+          # arm64 refuses to dlopen unsigned code, so an unsigned mirror is a
+          # driver that cannot load on every Mac sold since 2020.
+          if ! codesign -dv "$DYLIB" 2>/dev/null; then
+            codesign --force --sign - "$DYLIB"
+          fi
+          codesign --verify "$DYLIB"
+
+      - name: Package
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          NAME="moltenvk-${VERSION}-macos-universal.tar.gz"
+          # One top-level directory, regular files only: install.Extract strips
+          # the first and refuses anything that is not the second.
+          tar -czf "$NAME" -C stage "moltenvk-${VERSION}"
+          shasum -a 256 "$NAME" > "$NAME.sha256"
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+
+      - name: Print the pin to paste into internal/deps/deps.go
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          {
+            echo '```go'
+            echo "const Version = \"${VERSION}\""
+            echo "assetSHA256 = \"$(shasum -a 256 "$NAME" | cut -d' ' -f1)\""
+            echo "assetSize   = int64($(wc -c < "$NAME" | tr -d ' '))"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: |
+            ${{ env.NAME }}
+            ${{ env.NAME }}.sha256
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          TAG="deps/moltenvk-${VERSION}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "MoltenVK ${VERSION}" \
+              --notes "The Vulkan driver the launcher installs on macOS, repackaged from KhronosGroup/MoltenVK v${VERSION}: the universal dylib and its licence. Not a launcher release." \
+              --latest=false
+          fi
+          gh release upload "$TAG" "$NAME" "$NAME.sha256" --clobber
