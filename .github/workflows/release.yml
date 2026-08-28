@@ -29,6 +29,12 @@ jobs:
   macos:
     name: macOS universal
     runs-on: macos-latest
+    # deps/* releases carry the MoltenVK mirror, not a launcher build. They are
+    # published from moltenvk.yml and there is no launcher to build at that tag
+    # — without this, publishing one would run the signing and notarization job
+    # against whatever `deps/moltenvk-1.4.2` happens to point at. Empty for a
+    # workflow_dispatch run, which is how that path stays unaffected.
+    if: ${{ !startsWith(github.event.release.tag_name, 'deps/') }}
     steps:
       - name: Resolve the release tag
         run: echo "TAG=${{ github.event.release.tag_name || inputs.tag }}" >> "$GITHUB_ENV"

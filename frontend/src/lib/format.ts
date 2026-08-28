@@ -3,6 +3,7 @@
 /** The download phases the Go side reports, in words. */
 export function phaseLabel(phase: string): string {
     switch (phase) {
+        case "dependencies": return "Preparing graphics driver";
         case "downloading": return "Downloading";
         case "verifying": return "Verifying";
         case "extracting": return "Unpacking";

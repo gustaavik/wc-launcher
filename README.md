@@ -48,11 +48,13 @@ versions/<tag>/    an installed build: the wyvencraft binary plus assets/
 data/              the game's WYVEN_DATA_DIR
   saves/  profile.toml  authkeys.toml  ops.toml
 logs/              launcher.log, game.log
+runtime/moltenvk/  the Vulkan driver the launcher installs on the game's behalf
 launcher-update/   a downloaded launcher, until it replaces the running one
 ```
 
 `versions/` and `data/` are separate on purpose: applying an update replaces a
 whole version directory, so nothing that must survive one may live inside it.
+`runtime/` and `launcher-update/` are outside it for the same reason.
 The game agrees with this layout — its `src/paths.rs` resolves the same default,
 so starting it by hand finds the same worlds.
 
@@ -208,11 +210,30 @@ is re-read from disk once the game exits.
 
 ## Vulkan on macOS
 
-The game renders through MoltenVK, and the release tarball does not bundle it.
-The launcher looks for a driver (Homebrew, `/usr/local`, `$VULKAN_SDK`, or a
-`MoltenVK/` directory inside the build) and sets `VK_ICD_FILENAMES`,
-`VK_DRIVER_FILES` and `DYLD_LIBRARY_PATH`. If none is found it refuses to launch
-and suggests `brew install molten-vk vulkan-loader`, which is more useful than a
-crash inside the loader.
+The game renders through MoltenVK, and nobody should have to install Homebrew to
+play a game. The launcher installs the driver itself: `internal/deps` downloads a
+pinned, checksummed build into `runtime/moltenvk/<version>/` beside `versions/`,
+alongside the game and again at launch if it turns out to be missing. Roughly
+3 MB, and invisible unless the connection is slow enough to want a progress bar.
+
+`internal/gamesvc` then points the child at it with `VK_ICD_FILENAMES`,
+`VK_DRIVER_FILES` and `DYLD_LIBRARY_PATH`, preferring, in order: whatever the
+launcher's own environment already sets (a developer's shell), a `MoltenVK/`
+directory inside the build, the launcher-managed copy, Homebrew, `/usr/local`,
+`$VULKAN_SDK`.
+
+`DYLD_LIBRARY_PATH` is the one that matters. vulkano tries `libvulkan.dylib`,
+`libvulkan.1.dylib` and then `libMoltenVK.dylib`, so it reaches the driver with
+no Vulkan loader installed at all; the ICD manifest is written beside the dylib
+for the case where a loader is present and gets there first. Both are set, and
+they land on the same driver either way.
+
+The version is pinned in `internal/deps/deps.go` and the archive is published by
+`.github/workflows/moltenvk.yml` under its own `deps/moltenvk-<version>` tag —
+not a launcher release, because the driver changes on its own schedule. Bumping
+it means running that workflow and pasting back the checksum it prints.
+
+Only if all of that fails does the launcher refuse to start the game, which is
+still more useful than a crash inside the loader.
 
 [wcauthserver]: https://github.com/gustaavik/wcauthserver

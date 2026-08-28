@@ -140,7 +140,8 @@ class LauncherState {
         Events.On("update:progress", (event) => {
             this.progress = event.data ?? null;
             const phase = this.progress?.phase;
-            this.installing = phase === "downloading" || phase === "verifying" || phase === "extracting";
+            this.installing = phase === "dependencies" || phase === "downloading"
+                || phase === "verifying" || phase === "extracting";
         });
 
         Events.On("launcher:progress", (event) => {

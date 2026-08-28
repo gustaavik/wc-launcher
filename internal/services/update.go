@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/gustaavik/wc-launcher/internal/deps"
 	"github.com/gustaavik/wc-launcher/internal/install"
 	"github.com/gustaavik/wc-launcher/internal/wcauth"
 )
@@ -175,9 +176,17 @@ func (u *UpdateService) Install() string {
 		return userMessage(err)
 	}
 
-	err = u.core.Install.Install(ctx, token, release, func(p install.Progress) {
-		u.core.emit("update:progress", p)
-	})
+	report := func(p install.Progress) { u.core.emit("update:progress", p) }
+
+	// The Vulkan driver, before the game. Deliberately not fatal: a machine
+	// that already has one does not need this to succeed, and a hiccup here
+	// must not throw away a game download that would otherwise have worked.
+	// GameService.Launch tries again if it turns out the game cannot run.
+	if _, err := deps.Ensure(ctx, u.core.Layout, report); err != nil {
+		logIfErr("could not install the graphics driver", err)
+	}
+
+	err = u.core.Install.Install(ctx, token, release, report)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			u.core.emit("update:progress", install.Progress{Phase: "cancelled", Percent: -1})

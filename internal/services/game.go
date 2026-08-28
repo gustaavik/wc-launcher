@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/gustaavik/wc-launcher/internal/deps"
 	"github.com/gustaavik/wc-launcher/internal/gamesvc"
 	"github.com/gustaavik/wc-launcher/internal/install"
 )
@@ -62,11 +63,21 @@ func (g *GameService) Launch() string {
 	// 3. profile.toml is already current: AccountToken persisted it above, and
 	//    Session writes it on every adopt. Nothing more to hand over.
 
+	// 4. Make sure there is a Vulkan driver. Normally installed alongside the
+	//    game, so this is a stat; the download is the repair path for a build
+	//    installed before this existed, a pinned profile, or WCL_DEV_GAME_DIR.
+	//    Runner.Start refuses if it is still missing afterwards.
+	moltenVK := g.core.Layout.MoltenVKDir(deps.Version)
+	if !gamesvc.VulkanReady(versionDir, moltenVK) {
+		logIfErr("could not install the graphics driver", g.installDriver(ctx))
+	}
+
 	opts := gamesvc.Options{
-		DataDir:    g.core.Layout.Data,
-		AuthURL:    g.core.Settings.ResolvedAuthURL(),
-		VersionDir: versionDir,
-		LogFilter:  g.core.Settings.LogFilter,
+		DataDir:     g.core.Layout.Data,
+		AuthURL:     g.core.Settings.ResolvedAuthURL(),
+		VersionDir:  versionDir,
+		LogFilter:   g.core.Settings.LogFilter,
+		MoltenVKDir: moltenVK,
 	}
 
 	err = g.core.Runner.Start(opts, g.core.Layout.GameLog(),
@@ -84,6 +95,45 @@ func (g *GameService) Launch() string {
 
 	g.core.emit("game:state", g.core.Runner.Status())
 	return ""
+}
+
+// installDriver fetches the Vulkan driver, reporting onto the event the update
+// panel already renders.
+//
+// It registers its cancel function where UpdateService.Cancel looks, because
+// the panel it raises has a Cancel button on it: a slow connection must not
+// leave the player watching a bar they cannot stop. That also means an install
+// cannot start underneath this, which is what we want — the same event stream
+// would otherwise be describing two downloads at once.
+func (g *GameService) installDriver(ctx context.Context) error {
+	g.core.mu.Lock()
+	if g.core.cancelInstall != nil {
+		g.core.mu.Unlock()
+		return errors.New("an install is already running")
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	g.core.cancelInstall = cancel
+	g.core.mu.Unlock()
+
+	defer func() {
+		g.core.mu.Lock()
+		g.core.cancelInstall = nil
+		g.core.mu.Unlock()
+		cancel()
+	}()
+
+	_, err := deps.Ensure(ctx, g.core.Layout, func(p install.Progress) {
+		g.core.emit("update:progress", p)
+	})
+
+	// The panel was raised by the first progress event and nothing else will
+	// lower it, so this step has to say when it is over.
+	if err != nil {
+		g.core.emit("update:progress", install.Progress{Phase: "failed", Percent: -1})
+		return err
+	}
+	g.core.emit("update:progress", install.Progress{Phase: "done", Percent: 100})
+	return nil
 }
 
 // Stop ends the game.

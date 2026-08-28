@@ -125,3 +125,33 @@ func TestAHostileTagCannotEscapeTheLauncherUpdateDirectory(t *testing.T) {
 		}
 	}
 }
+
+// The driver must not live inside versions/. Installing a build does RemoveAll
+// + Rename on its version directory and Prune deletes old ones, so a driver
+// kept there would be thrown away and downloaded again on every game update.
+func TestTheDriverLivesOutsideVersions(t *testing.T) {
+	layout := Layout{
+		Root:     "/root",
+		Versions: filepath.Join("/root", "versions"),
+		Runtime:  filepath.Join("/root", "runtime"),
+	}
+
+	dir := layout.MoltenVKDir("1.4.2")
+	if !strings.HasPrefix(dir, layout.Runtime+string(filepath.Separator)) {
+		t.Errorf("MoltenVKDir is %s, want it under %s", dir, layout.Runtime)
+	}
+	if strings.HasPrefix(dir, layout.Versions+string(filepath.Separator)) {
+		t.Errorf("MoltenVKDir is %s, which an install or a prune would delete", dir)
+	}
+}
+
+// The version names a directory, so it goes through the same sanitiser a
+// release tag does.
+func TestTheDriverVersionIsSanitisedIntoTheDirectoryName(t *testing.T) {
+	layout := Layout{Root: "/root", Runtime: filepath.Join("/root", "runtime")}
+
+	dir := layout.MoltenVKDir("../../etc")
+	if !strings.HasPrefix(dir, layout.Runtime+string(filepath.Separator)) {
+		t.Errorf("MoltenVKDir escaped to %s", dir)
+	}
+}
