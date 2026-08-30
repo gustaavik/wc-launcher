@@ -35,6 +35,9 @@ against the player's own token, so installing or updating a build is the one
 action that asks for a sign-in — and it says so on the button rather than
 failing after the click.
 
+The launcher signs in; it never signs up. Accounts are created at
+**[wyvencraft.com](https://wyvencraft.com)**.
+
 ## On disk
 
 Everything lives under one root — `~/Library/Application Support/Wyvencraft`
