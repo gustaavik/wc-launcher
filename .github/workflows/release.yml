@@ -39,16 +39,16 @@ jobs:
       - name: Resolve the release tag
         run: echo "TAG=${{ github.event.release.tag_name || inputs.tag }}" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # A workflow_dispatch run builds the tagged source, not the branch head.
           ref: ${{ env.TAG }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # Vite 8 needs Node 20.19+ / 22.12+.
           node-version: "22"
