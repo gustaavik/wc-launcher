@@ -240,3 +240,14 @@ Only if all of that fails does the launcher refuse to start the game, which is
 still more useful than a crash inside the loader.
 
 [wcauthserver]: https://github.com/gustaavik/wcauthserver
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+The launcher is the thinnest of the four pieces and there is nothing here worth
+protecting: it signs you in, downloads a release, and starts the game. The
+[game and engine](https://github.com/gustaavik/wyvencraft) are MIT OR
+Apache-2.0; the game's *assets* and the **Wyvencraft** name are not — see that
+repository's `assets/LICENSE` and `TRADEMARK.md`. The [auth server][wcauthserver]
+is private, and its Docker image ships under its own terms.
