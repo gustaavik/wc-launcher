@@ -3,7 +3,7 @@ module github.com/gustaavik/wc-launcher
 go 1.25.0
 
 require (
-	github.com/wailsapp/wails/v3 v3.0.0-beta.12
+	github.com/wailsapp/wails/v3 v3.0.0-beta.16
 	github.com/yuin/goldmark v1.8.5
 )
 

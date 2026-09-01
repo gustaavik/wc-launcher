@@ -21,7 +21,7 @@ permissions:
 env:
   # Must match the wails/v3 version in go.mod, or the CLI and the library
   # disagree about the generated bindings.
-  WAILS_VERSION: v3.0.0-beta.12
+  WAILS_VERSION: v3.0.0-beta.16
   # APP_NAME in Taskfile.yml, which is what names bin/<APP_NAME>.app.
   APP_NAME: Wyvencraft
 
