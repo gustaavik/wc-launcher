@@ -1,10 +1,10 @@
 // Package selfupdate keeps the launcher itself current.
 //
-// The game is updated through wcauthserver's release broker, because the game
-// repository is private and the launcher must never carry a GitHub credential.
-// The launcher's own repository is public, so this package talks to GitHub
-// directly: no token, no account server, and therefore a launcher that can
-// still update itself while signed out or while the account server is down.
+// The game comes from the published catalogue on s3.wyvencraft.com, read
+// anonymously by internal/catalog. The launcher's own repository is public, so
+// this package reaches for GitHub directly instead: no token, no account
+// server, and therefore a launcher that can still update itself while signed
+// out or while the account server is down.
 //
 // wcauth.Client is deliberately not reused. It speaks the account server's
 // {"status":"ok","data":...} envelope, which api.github.com does not.
