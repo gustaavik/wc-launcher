@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"errors"
 
 	"github.com/gustaavik/wc-launcher/internal/install"
 )
@@ -87,30 +86,19 @@ func (p *ProfileService) Delete(id string) ProfileList {
 
 // Releases lists the versions a profile can be pinned to.
 //
-// Needs a bearer token, so it reports the same signed-out and game-running
-// conditions the update check does rather than failing opaquely.
+// Reads the public catalogue, so it needs no token: a signed-out player can
+// browse and pin versions, and so can one whose game is running.
+//
+// Unlike the Latest profile, this includes prereleases — pinning one is how a
+// player opts into it, and the picker shows the flag rather than hiding them.
 func (p *ProfileService) Releases() ReleaseList {
-	ctx := context.Background()
-
-	token, err := p.core.Session.AccessToken(ctx)
-	if err != nil {
-		switch {
-		case errors.Is(err, ErrGameRunning):
-			return ReleaseList{Error: "Wyvencraft is running."}
-		case errors.Is(err, ErrSignedOut):
-			return ReleaseList{Error: "Sign in to see the available versions."}
-		default:
-			return ReleaseList{Error: userMessage(err)}
-		}
-	}
-
-	releases, err := p.core.Client.Releases(ctx, token)
+	index, err := p.core.Catalog.Index(context.Background())
 	if err != nil {
 		return ReleaseList{Error: userMessage(err)}
 	}
 
-	options := make([]ReleaseOption, 0, len(releases))
-	for _, release := range releases {
+	options := make([]ReleaseOption, 0, len(index.Releases))
+	for _, release := range index.Releases {
 		_, assetErr := install.SelectAsset(release)
 		options = append(options, ReleaseOption{
 			Tag:         release.Tag,

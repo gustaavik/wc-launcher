@@ -26,7 +26,7 @@ func TestLaunchHandsTheGameASessionAndADataDirectory(t *testing.T) {
 		t.Skip("set WCL_DEV_GAME_DIR to a directory holding a wyvencraft binary and assets/")
 	}
 
-	core := testCore(t, authURL)
+	core := testCore(t, authURL, os.Getenv(catalogURLVar))
 	auth := NewAuthService(core)
 	game := NewGameService(core)
 

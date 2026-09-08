@@ -47,10 +47,14 @@ export function CancelLauncher(): $CancellablePromise<void> {
 /**
  * Check reports what the selected profile needs and whether it can play.
  * 
- * Never fails outright: a check that cannot reach the server still reports what
- * is installed, because an offline player with a build should still be able to
- * press Play. That is also why the forced update is gated on a *successful*
- * check — see UpdateStatus.Required.
+ * Never fails outright: a check that cannot reach the catalogue still reports
+ * what is installed, because an offline player with a build should still be
+ * able to press Play. That is also why the forced update is gated on a
+ * *successful* check — see UpdateStatus.Required.
+ * 
+ * Needs no access token, which is what lets it run while the game is running:
+ * the one thing the launcher must not do then is touch the refresh token, and
+ * reading a public catalogue does not.
  */
 export function Check(): $CancellablePromise<$models.UpdateStatus> {
     return $Call.ByID(1881011116);

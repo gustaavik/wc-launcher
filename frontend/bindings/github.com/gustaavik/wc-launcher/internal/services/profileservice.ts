@@ -58,8 +58,11 @@ export function List(): $CancellablePromise<$models.ProfileList> {
 /**
  * Releases lists the versions a profile can be pinned to.
  * 
- * Needs a bearer token, so it reports the same signed-out and game-running
- * conditions the update check does rather than failing opaquely.
+ * Reads the public catalogue, so it needs no token: a signed-out player can
+ * browse and pin versions, and so can one whose game is running.
+ * 
+ * Unlike the Latest profile, this includes prereleases — pinning one is how a
+ * player opts into it, and the picker shows the flag rather than hiding them.
  */
 export function Releases(): $CancellablePromise<$models.ReleaseList> {
     return $Call.ByID(2292850906);

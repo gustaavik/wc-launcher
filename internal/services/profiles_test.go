@@ -6,15 +6,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gustaavik/wc-launcher/internal/catalog"
 	"github.com/gustaavik/wc-launcher/internal/install"
-	"github.com/gustaavik/wc-launcher/internal/wcauth"
 )
 
 // hermeticCore is a Core that never reaches the network. The address is one
 // nothing listens on, so any accidental call fails fast rather than hanging.
 func hermeticCore(t *testing.T) *Core {
 	t.Helper()
-	return testCore(t, "http://127.0.0.1:1")
+	return testCore(t, "http://127.0.0.1:1", "http://127.0.0.1:1")
 }
 
 // installBuild fakes an unpacked build under versions/<tag>.
@@ -32,7 +32,11 @@ func installBuild(t *testing.T, core *Core, tag string) {
 
 // published mirrors the release workflow's asset naming for every target
 // the installer knows, so the same fixture works on any developer's machine.
-func published(tag string) wcauth.Release {
+//
+// Two of those targets have no CI job today. They stay in deliberately: the
+// matcher must keep working for them the day one is added, and a fixture that
+// only covers what ships would not notice if it stopped.
+func published(tag string) catalog.Release {
 	names := []string{
 		"aarch64-apple-darwin.tar.gz",
 		"x86_64-apple-darwin.tar.gz",
@@ -40,15 +44,19 @@ func published(tag string) wcauth.Release {
 		"aarch64-unknown-linux-gnu.tar.gz",
 		"x86_64-pc-windows-msvc.zip",
 	}
-	assets := make([]wcauth.Asset, 0, len(names))
-	for i, suffix := range names {
-		assets = append(assets, wcauth.Asset{
-			ID:   string(rune('1' + i)),
-			Name: "wyvencraft-" + tag + "-" + suffix,
-			Size: "1024",
+	assets := make([]catalog.Asset, 0, len(names))
+	for _, suffix := range names {
+		name := "wyvencraft-" + tag + "-" + suffix
+		assets = append(assets, catalog.Asset{
+			Name: name,
+			Path: "game/" + tag + "/" + name,
+			Size: 1024,
+			// The catalogue always publishes one; an asset without is refused
+			// before it can reach an install.
+			SHA256: "51295ab76d3e630c3efbc54e086203712c3cc76c80965ed9cbe90326336836d5",
 		})
 	}
-	return wcauth.Release{Tag: tag, Name: tag, Assets: assets}
+	return catalog.Release{Tag: tag, Name: tag, Assets: assets}
 }
 
 // The force, enforced behind the binding rather than by a disabled button.
@@ -87,7 +95,7 @@ func TestLatestProfileStillLaunchesWhenTheNewReleaseHasNoBuildForThisPlatform(t 
 	core := hermeticCore(t)
 	installBuild(t, core, "v0.0.1")
 	// No assets at all, so SelectAsset finds nothing for any platform.
-	latest := wcauth.Release{Tag: "v0.0.2", Name: "v0.0.2"}
+	latest := catalog.Release{Tag: "v0.0.2", Name: "v0.0.2"}
 	core.setKnownLatest(&latest)
 
 	if _, err := NewGameService(core).launchPlan(); err != nil {
@@ -219,17 +227,24 @@ func TestFirstRunWithAnInstalledBuildAndNoProfilesFileSelectsLatest(t *testing.T
 	}
 }
 
-// Tokens and release lists both belong to one server. A cached "newest release"
-// from the old one would force an update to a tag the new one never published.
-func TestChangingTheAccountServerForgetsTheCachedLatestRelease(t *testing.T) {
+// Tokens belong to a server; published builds do not. Changing the account
+// server used to forget the cached "newest release" because the release list
+// came from that same server — now it comes from the catalogue, which is the
+// same wherever the player signs in, so forgetting it would only cost a
+// needless re-check.
+func TestChangingTheAccountServerKeepsTheCachedLatestRelease(t *testing.T) {
 	core := hermeticCore(t)
 	latest := published("v0.0.2")
 	core.setKnownLatest(&latest)
 
 	NewAuthService(core).SaveSettings("http://127.0.0.1:2", "")
 
-	if _, ok := core.knownLatest(); ok {
-		t.Error("the cached release should have been forgotten with the server")
+	kept, ok := core.knownLatest()
+	if !ok {
+		t.Fatal("the catalogue is not per-server; the cached release should survive")
+	}
+	if kept.Tag != "v0.0.2" {
+		t.Errorf("kept %q, want v0.0.2", kept.Tag)
 	}
 }
 

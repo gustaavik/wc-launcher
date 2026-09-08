@@ -38,9 +38,9 @@ const downloadTimeout = 30 * time.Minute
 
 // Fetch downloads url into path, resuming if a partial file is already there.
 //
-// Resume matters more than it looks: these URLs are short-lived, so a download
-// interrupted near the end would otherwise restart from zero after the launcher
-// asks for a fresh one.
+// The catalogue's URLs are stable, so resume is a straightforward saving rather
+// than a race against an expiring link: a transfer interrupted near the end
+// picks up where it stopped instead of starting a few hundred megabytes again.
 func Fetch(ctx context.Context, url, path string, expectSize int64, report ProgressFunc) error {
 	resumeFrom := int64(0)
 	if info, err := os.Stat(path); err == nil {

@@ -3,8 +3,6 @@ package install
 import (
 	"context"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,8 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gustaavik/wc-launcher/internal/catalog"
 	"github.com/gustaavik/wc-launcher/internal/paths"
-	"github.com/gustaavik/wc-launcher/internal/wcauth"
 )
 
 // keptVersions is how many builds beyond the pinned ones survive a prune: the
@@ -40,17 +38,21 @@ type Build struct {
 }
 
 // Installer downloads and unpacks game builds.
+//
+// It holds no client. An asset's URL is a pure function of the catalogue's base
+// and the asset's own path, so there is no link to broker and nothing to
+// expire — the caller passes the URL in. That is the whole of what this package
+// used to need the account server for.
 type Installer struct {
 	layout paths.Layout
-	client *wcauth.Client
 
 	// mu serialises installs. Two at once would race on the same temp paths,
 	// and there is no reason to allow it.
 	mu sync.Mutex
 }
 
-func New(layout paths.Layout, client *wcauth.Client) *Installer {
-	return &Installer{layout: layout, client: client}
+func New(layout paths.Layout) *Installer {
+	return &Installer{layout: layout}
 }
 
 // List reports every unpacked, playable build, newest first.
@@ -134,7 +136,7 @@ func (i *Installer) Installed(tag string) bool {
 // Nothing is visible under versions/<tag> until the whole thing has succeeded:
 // the unpack goes to a temp directory and is renamed into place at the end. A
 // failure part-way leaves the previous install untouched and playable.
-func (i *Installer) Install(ctx context.Context, accessToken string, release wcauth.Release, report ProgressFunc) error {
+func (i *Installer) Install(ctx context.Context, release catalog.Release, assetURL string, report ProgressFunc) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
@@ -143,23 +145,16 @@ func (i *Installer) Install(ctx context.Context, accessToken string, release wca
 		return err
 	}
 
-	wantHash, err := i.expectedHash(ctx, accessToken, release, asset)
-	if err != nil {
-		return err
-	}
-
 	// Kept between attempts so an interrupted download can resume.
 	partial := filepath.Join(i.layout.Versions, ".download-"+asset.Name+".part")
 
-	url, err := i.client.DownloadURL(ctx, accessToken, asset.ID)
-	if err != nil {
-		return fmt.Errorf("could not get a download link: %w", err)
-	}
-	if err := Fetch(ctx, url, partial, asset.SizeBytes(), report); err != nil {
+	if err := Fetch(ctx, assetURL, partial, asset.Size, report); err != nil {
 		return err
 	}
 
-	if err := Verify(partial, wantHash, report); err != nil {
+	// The catalogue guarantees a checksum, so there is no sibling to fetch and
+	// no unverified path to fall back to. Verify still refuses an empty hash.
+	if err := Verify(partial, asset.SHA256, report); err != nil {
 		// A mismatched file will never verify, so keeping it would make every
 		// later attempt resume onto corrupt bytes.
 		os.Remove(partial)
@@ -212,45 +207,6 @@ func (i *Installer) Install(ctx context.Context, accessToken string, release wca
 		report(Progress{Phase: "done", Percent: 100})
 	}
 	return nil
-}
-
-// expectedHash finds the SHA-256 to check the download against: the digest
-// published with the asset, or failing that the `.sha256` sibling.
-func (i *Installer) expectedHash(ctx context.Context, accessToken string, release wcauth.Release, asset wcauth.Asset) (string, error) {
-	if hash := asset.SHA256(); hash != "" {
-		return hash, nil
-	}
-
-	sibling, ok := ChecksumAsset(release, asset)
-	if !ok {
-		return "", fmt.Errorf("%s publishes no checksum for %s; refusing to install it unverified",
-			release.Tag, asset.Name)
-	}
-
-	url, err := i.client.DownloadURL(ctx, accessToken, sibling.ID)
-	if err != nil {
-		return "", fmt.Errorf("could not fetch the checksum: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", fmt.Errorf("build checksum request: %w", err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("fetch the checksum: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// A checksum line is under 128 bytes; anything larger is not one.
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if err != nil {
-		return "", fmt.Errorf("read the checksum: %w", err)
-	}
-	hash := ParseChecksum(string(body))
-	if hash == "" {
-		return "", fmt.Errorf("could not read a checksum for %s", asset.Name)
-	}
-	return hash, nil
 }
 
 // Prune deletes installed builds that nothing needs, and reports what it took.

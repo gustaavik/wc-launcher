@@ -1,9 +1,10 @@
 // Package wcauth talks to the Wyvencraft account server.
 //
 // It covers exactly what a launcher needs: sign in, keep the session alive,
-// sign out, fetch the ticket-verification keys the game caches, and ask which
-// game build is current. Registration is deliberately absent — accounts are
-// created elsewhere.
+// sign out, and fetch the ticket-verification keys the game caches.
+// Registration is deliberately absent — accounts are created elsewhere. So are
+// downloads: the game is published to object storage and read by
+// internal/catalog, with no account and no token in the path.
 //
 // Every response uses the server's envelope, tagged on "status". Requests that
 // never reach a handler do not: axum's own rejections (400, 408, 413, 415, 422)
@@ -18,7 +19,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -134,57 +134,15 @@ type keysResponse struct {
 }
 
 // Health is what /healthz reports. Used for feature detection.
+//
+// The server also reports updates_enabled, for the release broker it used to
+// answer downloads from. The launcher no longer reads it: game builds come from
+// the catalogue, so a server with the broker switched off is not a server this
+// launcher cannot download through.
 type Health struct {
-	Status  string `json:"status"`
-	Version string `json:"version"`
-	// UpdatesEnabled reports whether this server brokers game downloads. When
-	// false, the launcher can say so instead of provoking a 501.
-	UpdatesEnabled bool `json:"updates_enabled"`
-	OAuthEnabled   bool `json:"oauth_enabled"`
-}
-
-// Release is a published game build.
-type Release struct {
-	Tag         string  `json:"tag"`
-	Name        string  `json:"name"`
-	Notes       string  `json:"notes"`
-	PublishedAt string  `json:"published_at"`
-	Prerelease  bool    `json:"prerelease"`
-	Assets      []Asset `json:"assets"`
-}
-
-// Asset is one downloadable file attached to a [Release].
-type Asset struct {
-	// ID and Size are u64 sent as strings, for the same reason as NetcodeID.
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Size string `json:"size"`
-	// Digest is "sha256:<hex>", or empty when upstream published none.
-	Digest string `json:"digest"`
-}
-
-// SizeBytes parses Size. Zero when absent or unreadable, which callers should
-// treat as "unknown" rather than "empty file".
-func (a Asset) SizeBytes() int64 {
-	n, err := strconv.ParseInt(a.Size, 10, 64)
-	if err != nil {
-		return 0
-	}
-	return n
-}
-
-// SHA256 is the expected content hash as lowercase hex, or "" if the release
-// did not publish one.
-func (a Asset) SHA256() string {
-	return strings.ToLower(strings.TrimPrefix(a.Digest, "sha256:"))
-}
-
-type releaseListResponse struct {
-	Releases []Release `json:"releases"`
-}
-
-type downloadResponse struct {
-	URL string `json:"url"`
+	Status       string `json:"status"`
+	Version      string `json:"version"`
+	OAuthEnabled bool   `json:"oauth_enabled"`
 }
 
 // ---------------------------------------------------------------- calls
@@ -231,40 +189,6 @@ func (c *Client) Keys(ctx context.Context) ([]Key, error) {
 	return out.Keys, err
 }
 
-// LatestRelease asks which game build is current.
-func (c *Client) LatestRelease(ctx context.Context, accessToken string) (Release, error) {
-	var out Release
-	err := c.do(ctx, http.MethodGet, "/api/v1/releases/latest", accessToken, nil, &out)
-	return out, err
-}
-
-// Releases lists every published build, newest first.
-//
-// The version picker's source, and how a profile pinned to an older tag finds
-// the assets to install with. A launcher that only ever installs the newest
-// build does not need this; one that lets a player pin does.
-//
-// Unlike LatestRelease, this includes prereleases: /releases/latest follows the
-// repository's stable-release pointer, so the newest entry here is occasionally
-// newer than that. Callers show the Prerelease flag rather than hiding them.
-func (c *Client) Releases(ctx context.Context, accessToken string) ([]Release, error) {
-	var out releaseListResponse
-	err := c.do(ctx, http.MethodGet, "/api/v1/releases", accessToken, nil, &out)
-	return out.Releases, err
-}
-
-// DownloadURL resolves where one asset can be fetched from.
-//
-// The URL is short-lived and carries its own authorization. Use it at once and
-// never store it; if a download fails partway, ask again rather than retrying
-// the old one.
-func (c *Client) DownloadURL(ctx context.Context, accessToken, assetID string) (string, error) {
-	var out downloadResponse
-	path := "/api/v1/releases/assets/" + assetID + "/download"
-	err := c.do(ctx, http.MethodGet, path, accessToken, nil, &out)
-	return out.URL, err
-}
-
 // ---------------------------------------------------------------- plumbing
 
 // envelope is the server's response wrapper, tagged on "status".
@@ -277,10 +201,10 @@ type envelope struct {
 
 // maxBody caps what will be read from a response.
 //
-// Sized for the release list, which is the only large body here: thirty
-// releases (the server's ListReleases::LIMIT), each carrying its own Markdown
-// notes. Everything else is a small JSON object.
-const maxBody = 4 << 20
+// Every body here is now a small JSON object — a session, an account, a key
+// list. A megabyte is room to spare, and small enough that a proxy's error
+// page cannot become a memory problem.
+const maxBody = 1 << 20
 
 func (c *Client) do(ctx context.Context, method, path, bearer string, in, out any) error {
 	var body io.Reader
