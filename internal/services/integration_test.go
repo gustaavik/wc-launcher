@@ -51,8 +51,12 @@ func testCore(t *testing.T, authURL, catalogURL string) *Core {
 		Versions: filepath.Join(root, "versions"),
 		Data:     filepath.Join(root, "data"),
 		Logs:     filepath.Join(root, "logs"),
+		// Runtime is where deps.Ensure installs MoltenVK. Left empty it
+		// resolves relative, so an install test would write a Vulkan driver
+		// into whatever directory the test happened to run from.
+		Runtime: filepath.Join(root, "runtime"),
 	}
-	for _, dir := range []string{layout.Versions, layout.Data, layout.Logs} {
+	for _, dir := range []string{layout.Versions, layout.Data, layout.Logs, layout.Runtime} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
