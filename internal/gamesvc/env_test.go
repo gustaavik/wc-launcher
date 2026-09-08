@@ -24,7 +24,7 @@ func TestPresenceOnlyDevVariablesAreRemovedNotOverridden(t *testing.T) {
 		"PATH=/usr/bin",
 		"WYVEN_BOOT_INGAME=",
 		"WYVEN_HOST=0",
-		"WYVEN_JOIN=127.0.0.1:25565",
+		"WYVEN_JOIN=127.0.0.1:6091",
 		"WYVEN_WORLD=scratch",
 		"WYVEN_USERNAME=someone",
 		"WYVEN_PASSWORD=hunter2hunter2",

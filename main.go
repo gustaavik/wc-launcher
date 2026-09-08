@@ -77,6 +77,7 @@ func main() {
 			application.NewService(services.NewAuthService(core)),
 			application.NewService(services.NewUpdateService(core)),
 			application.NewService(services.NewGameService(core)),
+			application.NewService(services.NewProfileService(core)),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

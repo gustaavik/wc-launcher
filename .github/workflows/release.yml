@@ -21,7 +21,7 @@ permissions:
 env:
   # Must match the wails/v3 version in go.mod, or the CLI and the library
   # disagree about the generated bindings.
-  WAILS_VERSION: v3.0.0-beta.12
+  WAILS_VERSION: v3.0.0-beta.16
   # APP_NAME in Taskfile.yml, which is what names bin/<APP_NAME>.app.
   APP_NAME: Wyvencraft
 
@@ -29,23 +29,29 @@ jobs:
   macos:
     name: macOS universal
     runs-on: macos-latest
+    # deps/* releases carry the MoltenVK mirror, not a launcher build. They are
+    # published from moltenvk.yml and there is no launcher to build at that tag
+    # — without this, publishing one would run the signing and notarization job
+    # against whatever `deps/moltenvk-1.4.2` happens to point at. Empty for a
+    # workflow_dispatch run, which is how that path stays unaffected.
+    if: ${{ !startsWith(github.event.release.tag_name, 'deps/') }}
     steps:
       - name: Resolve the release tag
         run: echo "TAG=${{ github.event.release.tag_name || inputs.tag }}" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # A workflow_dispatch run builds the tagged source, not the branch head.
           ref: ${{ env.TAG }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # Vite 8 needs Node 20.19+ / 22.12+.
-          node-version: "22"
+          node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -192,7 +198,7 @@ jobs:
           spctl --assess --type exec -vv "bin/${APP_NAME}.app" 2>&1 | tee /tmp/spctl.txt
           grep -q "source=Notarized Developer ID" /tmp/spctl.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ env.NAME }}
           path: |

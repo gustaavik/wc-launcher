@@ -11,6 +11,7 @@ import (
 	"github.com/gustaavik/wc-launcher/internal/install"
 	"github.com/gustaavik/wc-launcher/internal/paths"
 	"github.com/gustaavik/wc-launcher/internal/profile"
+	"github.com/gustaavik/wc-launcher/internal/profiles"
 	"github.com/gustaavik/wc-launcher/internal/wcauth"
 )
 
@@ -62,6 +63,7 @@ func testCore(t *testing.T, authURL string) *Core {
 	}
 	core.Session = NewSession(layout, client, runner.Running)
 	core.Install = install.New(layout, client)
+	core.Profiles = profiles.Open(layout.ProfilesFile())
 	return core
 }
 
@@ -154,11 +156,11 @@ func TestEndToEndSignInAndInstall(t *testing.T) {
 			t.Fatalf("install: %s", msg)
 		}
 
-		state := core.Install.State()
-		if state.Tag == "" {
-			t.Fatal("nothing recorded as installed")
+		builds := core.Install.List()
+		if len(builds) == 0 {
+			t.Fatal("nothing installed")
 		}
-		dir := core.Layout.VersionDir(state.Tag)
+		dir := core.Layout.VersionDir(builds[0].Tag)
 
 		// The binary and assets/ must sit directly in the version directory:
 		// it becomes the game's working directory, and assets are resolved

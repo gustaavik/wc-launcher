@@ -4,11 +4,11 @@
 // object's worth of state, and the components that read it all read most of it.
 
 import { Events } from "@wailsio/runtime";
-import { AuthService, GameService, UpdateService } from "../../bindings/github.com/gustaavik/wc-launcher/internal/services";
-import type { AccountView, GameStatus, LauncherStatus, UpdateStatus } from "../../bindings/github.com/gustaavik/wc-launcher/internal/services";
-import type { Progress } from "../../bindings/github.com/gustaavik/wc-launcher/internal/install";
+import { AuthService, GameService, ProfileService, UpdateService } from "../../bindings/github.com/gustaavik/wc-launcher/internal/services";
+import type { AccountView, GameStatus, LauncherStatus, ProfileView, ReleaseOption, UpdateStatus } from "../../bindings/github.com/gustaavik/wc-launcher/internal/services";
+import type { Build, Progress } from "../../bindings/github.com/gustaavik/wc-launcher/internal/install";
 
-export type Route = "loading" | "login" | "home" | "settings";
+export type Route = "loading" | "login" | "home" | "settings" | "profiles";
 
 /** How many log lines to keep. Enough to see a startup failure, bounded so a
  *  chatty RUST_LOG cannot grow the page without limit. */
@@ -16,11 +16,26 @@ const LOG_LIMIT = 400;
 
 class LauncherState {
     route = $state<Route>("loading");
+    /** The screens to walk back out through. Home is the floor rather than an
+     *  entry, so it is never pushed and an empty stack means "go home" — which
+     *  is always a valid destination now that reaching it needs no account. */
+    private history: Route[] = [];
     account = $state<AccountView | null>(null);
 
     update = $state<UpdateStatus | null>(null);
     progress = $state<Progress | null>(null);
     installing = $state(false);
+
+    /** The player's profiles, Latest first. */
+    profiles = $state<ProfileView[]>([]);
+    selectedProfile = $state<string>("latest");
+    /** Versions a profile can be pinned to. Null until first fetched, which is
+     *  how the editor tells "not loaded yet" from "the server has none". */
+    releases = $state<ReleaseOption[] | null>(null);
+    builds = $state<Build[]>([]);
+    /** Shown on the profiles screen, separate from the home banner. */
+    profileError = $state("");
+    profileBusy = $state(false);
 
     /** The launcher's own update. Independent of the game's: it comes from
      *  GitHub rather than the account server, and works signed out. */
@@ -44,6 +59,11 @@ class LauncherState {
         return this.account !== null;
     }
 
+    /** The selected profile, or null before the first load. */
+    get profile(): ProfileView | null {
+        return this.profiles.find((p) => p.id === this.selectedProfile) ?? null;
+    }
+
     /** Whether to show the launcher-update strip at all. */
     get selfUpdateVisible(): boolean {
         const status = this.selfUpdate;
@@ -52,31 +72,76 @@ class LauncherState {
     }
 
     /** What the big button should say, given everything else. */
-    get action(): { label: string; kind: "play" | "install" | "update" | "none"; enabled: boolean } {
+    get action(): { label: string; kind: "play" | "install" | "update" | "signin" | "none"; enabled: boolean } {
         if (this.game.running) return { label: "Running", kind: "none", enabled: false };
         if (this.installing) return { label: "Installing…", kind: "none", enabled: false };
 
         const status = this.update;
         if (!status) return { label: "Checking…", kind: "none", enabled: false };
         if (!status.supported) return { label: "Unavailable", kind: "none", enabled: false };
-        if (!status.installedTag) return { label: "Install", kind: "install", enabled: true };
-        if (status.updateAvailable) return { label: "Update", kind: "update", enabled: true };
+
+        if (status.updateAvailable) {
+            // Required means the Latest profile: it promises the newest build,
+            // so the older one is not a fallback to keep playing while this is
+            // declined. Update and launch become one action rather than two.
+            if (status.required) return { label: "Update & Play", kind: "update", enabled: true };
+            return { label: status.installedTag ? "Update" : "Install", kind: "install", enabled: true };
+        }
         if (status.playable) return { label: "Play", kind: "play", enabled: true };
+        // Downloading a build is the one thing that genuinely needs an account:
+        // the game repository is private and the account server brokers the
+        // download. Say so on the button rather than offering a click that can
+        // only fail.
+        if (!this.signedIn) return { label: "Sign in to install", kind: "signin", enabled: true };
         return { label: "Install", kind: "install", enabled: true };
+    }
+
+    /** Why Play is not on offer, when that is not self-evident. */
+    get blockedReason(): string {
+        return this.update?.required
+            ? "Play is unavailable until Wyvencraft is up to date."
+            : "";
+    }
+
+    /** Enter a sub-screen, remembering where to come back to. */
+    go(route: Route) {
+        if (this.route !== "loading" && this.route !== "home") this.history.push(this.route);
+        this.route = route;
+    }
+
+    /** Leave a sub-screen for wherever it was entered from. */
+    back() {
+        this.route = this.history.pop() ?? "home";
+    }
+
+    /** Go home, ending any navigation. Home is where a finished errand ends,
+     *  whatever route led into it. */
+    home() {
+        this.history = [];
+        this.route = "home";
     }
 
     /** Wire up the Go events. Called once, from App. */
     listen() {
         Events.On("auth:changed", (event) => {
             // Wails wraps the payload; the value is on .data.
-            this.account = event.data ?? null;
-            if (!this.account && this.route === "home") this.route = "login";
+            const next: AccountView | null = event.data ?? null;
+            const changed = (next?.id ?? "") !== (this.account?.id ?? "");
+            this.account = next;
+            // The release list was read with the old account's token.
+            if (!next) this.releases = null;
+            // Never routes anywhere: this also fires when the game exits, and
+            // an offline player must not be thrown to a login screen for
+            // quitting. During boot, start() owns the sequence and checks once
+            // itself.
+            if (changed && this.route !== "loading") void this.check();
         });
 
         Events.On("update:progress", (event) => {
             this.progress = event.data ?? null;
             const phase = this.progress?.phase;
-            this.installing = phase === "downloading" || phase === "verifying" || phase === "extracting";
+            this.installing = phase === "dependencies" || phase === "downloading"
+                || phase === "verifying" || phase === "extracting";
         });
 
         Events.On("launcher:progress", (event) => {
@@ -100,15 +165,21 @@ class LauncherState {
         });
     }
 
-    /** Restore a stored session, then decide which screen to show. */
+    /** Restore a stored session, then open the home screen. */
     async start() {
         const result = await AuthService.Restore();
         this.account = result.account ?? null;
-        // An error here (an outage, an expired token) is shown on the login
-        // screen rather than swallowed — the player needs to know which it was.
+        // An error here (an outage, an expired token) is shown on the home
+        // banner rather than swallowed — the player needs to know which it was,
+        // even though neither one stops them playing.
         if (result.error) this.banner = result.error;
-        this.route = this.account ? "home" : "login";
-        if (this.account) void this.check();
+        // Home unconditionally. Playing a build that is already installed needs
+        // no account, so signing in is an offer rather than a gate.
+        this.home();
+        // Neither call needs a token: List() is read from disk, and Check()
+        // reports what is installed before it asks for one.
+        await this.loadProfiles();
+        void this.check();
         // Not gated on being signed in: updating the launcher needs no account,
         // and a launcher too old to sign in is exactly the one that must be
         // able to replace itself.
@@ -139,6 +210,81 @@ class LauncherState {
 
     cancelInstall() {
         void UpdateService.Cancel();
+    }
+
+    /** One click: fetch the build the profile needs, then start it.
+     *
+     *  The Latest profile forces the update, so making the player press twice
+     *  would only be ceremony. Never launches onto a failed install. */
+    async updateAndPlay() {
+        await this.install();
+        if (this.banner) return;
+        if (this.update?.playable) await this.play();
+    }
+
+    // ---------------------------------------------------------- profiles
+
+    /** Apply the result every profile mutator returns. */
+    private applyProfiles(result: { profiles: ProfileView[] | null; selected: string; error: string }) {
+        this.profiles = result.profiles ?? [];
+        this.selectedProfile = result.selected;
+        this.profileError = result.error;
+        return !result.error;
+    }
+
+    async loadProfiles() {
+        this.applyProfiles(await ProfileService.List());
+    }
+
+    /** Switch profile, then re-check: the entire Play button is derived from
+     *  which profile is selected. */
+    async selectProfile(id: string) {
+        if (id === this.selectedProfile) return;
+        this.applyProfiles(await ProfileService.Select(id));
+        await this.check();
+    }
+
+    async createProfile(name: string, tag: string): Promise<boolean> {
+        return this.profileCall(() => ProfileService.Create(name, tag));
+    }
+
+    async renameProfile(id: string, name: string): Promise<boolean> {
+        return this.profileCall(() => ProfileService.Rename(id, name));
+    }
+
+    async retagProfile(id: string, tag: string): Promise<boolean> {
+        return this.profileCall(() => ProfileService.Retag(id, tag));
+    }
+
+    async deleteProfile(id: string): Promise<boolean> {
+        return this.profileCall(() => ProfileService.Delete(id));
+    }
+
+    /** Run a mutator, refresh what depends on it, and report success. */
+    private async profileCall(call: () => Promise<{ profiles: ProfileView[] | null; selected: string; error: string }>) {
+        this.profileBusy = true;
+        try {
+            const ok = this.applyProfiles(await call());
+            if (ok) {
+                // A mutation can change what the selected profile needs, and
+                // which builds are still pinned.
+                await this.check();
+                await this.loadBuilds();
+            }
+            return ok;
+        } finally {
+            this.profileBusy = false;
+        }
+    }
+
+    async loadReleases() {
+        const result = await ProfileService.Releases();
+        this.releases = result.releases ?? [];
+        if (result.error) this.profileError = result.error;
+    }
+
+    async loadBuilds() {
+        this.builds = (await ProfileService.Builds()) ?? [];
     }
 
     async checkSelf() {
@@ -190,7 +336,14 @@ class LauncherState {
         }
         this.account = null;
         this.update = null;
-        this.route = "login";
+        // The release list and the profiles' installed flags were read with
+        // this account's token; keeping them would show stale answers to
+        // whoever signs in next.
+        this.releases = null;
+        this.profileError = "";
+        // Stays on Home: signing out costs multiplayer and downloads, not the
+        // build already on disk.
+        await this.check();
     }
 }
 

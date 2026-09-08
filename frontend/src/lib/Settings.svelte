@@ -38,7 +38,7 @@
   }
 
   function back() {
-    launcher.route = launcher.account ? "home" : "login";
+    launcher.back();
   }
 
   async function checkLauncher() {

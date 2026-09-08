@@ -4,9 +4,11 @@
 //
 //	<app-data>/Wyvencraft/
 //	  launcher.json      launcher settings
+//	  profiles.json      the player's profiles, and which one is selected
 //	  versions/<tag>/    an installed game build: the binary plus assets/
 //	  data/              the game's WYVEN_DATA_DIR: saves, profile.toml, ...
 //	  logs/              launcher.log, game.log
+//	  runtime/           libraries the game needs but does not ship, e.g. MoltenVK
 //	  launcher-update/   a downloaded launcher build, until it replaces this one
 //
 // The split between versions/ and data/ is the point. Applying an update
@@ -38,6 +40,8 @@ type Layout struct {
 	Data string
 	// Logs holds launcher.log and game.log.
 	Logs string
+	// Runtime holds the libraries the launcher installs on the game's behalf.
+	Runtime string
 }
 
 // New resolves the layout and creates every directory in it.
@@ -57,9 +61,10 @@ func New() (Layout, error) {
 		Versions: filepath.Join(root, "versions"),
 		Data:     filepath.Join(root, "data"),
 		Logs:     filepath.Join(root, "logs"),
+		Runtime:  filepath.Join(root, "runtime"),
 	}
 
-	for _, dir := range []string{layout.Root, layout.Versions, layout.Data, layout.Logs} {
+	for _, dir := range []string{layout.Root, layout.Versions, layout.Data, layout.Logs, layout.Runtime} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return Layout{}, fmt.Errorf("create %s: %w", dir, err)
 		}
@@ -70,8 +75,19 @@ func New() (Layout, error) {
 // SettingsFile is where launcher.json lives.
 func (l Layout) SettingsFile() string { return filepath.Join(l.Root, "launcher.json") }
 
-// StateFile records which version is installed.
+// StateFile is the old single-install record.
+//
+// Nothing writes it any more: which build is installed is answered by scanning
+// versions/, and which build to launch is a per-profile question. Kept only so
+// the launcher has a name for the file it deletes on first run.
 func (l Layout) StateFile() string { return filepath.Join(l.Root, "installed.json") }
+
+// ProfilesFile is where the player's launcher profiles live.
+//
+// Deliberately not a key in launcher.json: settings are written wholesale by
+// the settings screen, profiles are written one mutation at a time from the
+// home screen, and one file with two owners is a lost update waiting to happen.
+func (l Layout) ProfilesFile() string { return filepath.Join(l.Root, "profiles.json") }
 
 // VersionDir is the install directory for one release tag. It becomes the
 // game's working directory, which is how the game finds assets/.
@@ -100,6 +116,20 @@ func (l Layout) LauncherUpdateRoot() string { return filepath.Join(l.Root, "laun
 // comes from a remote server and would otherwise be a path traversal.
 func (l Layout) LauncherUpdateDir(tag string) string {
 	return filepath.Join(l.LauncherUpdateRoot(), safeTag(tag))
+}
+
+// MoltenVKDir is where one version of the Vulkan driver is installed.
+//
+// Deliberately outside versions/, for the same reason LauncherUpdateRoot is.
+// Installing a build does RemoveAll + Rename on its version directory and Prune
+// deletes old ones, so a driver kept there would be thrown away and downloaded
+// again on every single game update.
+//
+// The version is sanitised exactly as a release tag is: it is a constant today,
+// but it names a directory, and a directory name built from a string is a path
+// traversal waiting for the string to change.
+func (l Layout) MoltenVKDir(version string) string {
+	return filepath.Join(l.Runtime, "moltenvk", safeTag(version))
 }
 
 // appDataRoot is the OS application-data directory, without the AppDir suffix.

@@ -89,7 +89,7 @@ func (r *Runner) Start(opts Options, logPath string, onLog LogFunc, onExit ExitF
 		}
 	}
 
-	vulkan, ok := probeVulkan(opts.VersionDir)
+	vulkan, ok := probeVulkan(opts.VersionDir, opts.MoltenVKDir)
 	if !ok {
 		return ErrNoVulkan
 	}

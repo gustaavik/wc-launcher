@@ -3,10 +3,12 @@
 
 import * as AuthService from "./authservice.js";
 import * as GameService from "./gameservice.js";
+import * as ProfileService from "./profileservice.js";
 import * as UpdateService from "./updateservice.js";
 export {
     AuthService,
     GameService,
+    ProfileService,
     UpdateService
 };
 
@@ -15,6 +17,10 @@ export type {
     GameStatus,
     LauncherStatus,
     LoginResult,
+    ProfileList,
+    ProfileView,
+    ReleaseList,
+    ReleaseOption,
     ReleaseView,
     ServerInfo,
     SettingsView,

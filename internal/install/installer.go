@@ -2,7 +2,6 @@ package install
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,19 +10,33 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gustaavik/wc-launcher/internal/paths"
 	"github.com/gustaavik/wc-launcher/internal/wcauth"
 )
 
-// keptVersions is how many installs survive a prune: the current one and the
-// one before it, so a bad update can be rolled back by hand.
+// keptVersions is how many builds beyond the pinned ones survive a prune: the
+// newest and the one before it, so an update that turns out badly can still be
+// rolled back by hand.
 const keptVersions = 2
 
-// State records what is installed. Persisted as installed.json.
-type State struct {
-	// Tag of the installed build, or "" when nothing is installed.
+// tagMarker records the exact release tag a build came from.
+//
+// VersionDir sanitises a tag into a directory name, and that is deliberately
+// lossy — a tag is a remote string and a directory name has to be safe. So the
+// tag cannot be read back out of the path, and is written down beside the build
+// instead. Colocated rather than kept in a second index file: a build deleted
+// by hand takes its own record with it, and there is nothing left to fall out
+// of sync.
+const tagMarker = ".wyvencraft-tag"
+
+// Build is one unpacked game build on disk.
+type Build struct {
+	// Tag is the release this build came from.
 	Tag string `json:"tag"`
+	// InstalledAt is when it was moved into place.
+	InstalledAt time.Time `json:"installedAt"`
 }
 
 // Installer downloads and unpacks game builds.
@@ -40,22 +53,71 @@ func New(layout paths.Layout, client *wcauth.Client) *Installer {
 	return &Installer{layout: layout, client: client}
 }
 
-// State reads what is installed. A missing or unreadable file means nothing is.
-func (i *Installer) State() State {
-	raw, err := os.ReadFile(i.layout.StateFile())
+// List reports every unpacked, playable build, newest first.
+//
+// The directory *is* the record. There is no index file to go stale, and a
+// build removed by hand simply stops being listed.
+//
+// Never fails: an unreadable versions/ means "nothing is installed", which is
+// the same answer a first run gives and one every caller already handles.
+func (i *Installer) List() []Build {
+	entries, err := os.ReadDir(i.layout.Versions)
 	if err != nil {
-		return State{}
+		return nil
 	}
-	var state State
-	if err := json.Unmarshal(raw, &state); err != nil {
-		return State{}
+
+	builds := make([]Build, 0, len(entries))
+	for _, entry := range entries {
+		// Staging directories and partial downloads both start with a dot.
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		dir := filepath.Join(i.layout.Versions, entry.Name())
+		if _, err := os.Stat(filepath.Join(dir, GameBinary())); err != nil {
+			continue
+		}
+
+		build := Build{Tag: readTag(dir, entry.Name())}
+		if info, err := entry.Info(); err == nil {
+			build.InstalledAt = info.ModTime()
+		}
+		builds = append(builds, build)
 	}
-	// Trust the directory over the record: a file saying v1 is installed when
-	// the directory is gone would make Play spawn a missing binary.
-	if state.Tag != "" && !i.Installed(state.Tag) {
-		return State{}
+
+	// Newest first, which is the order every caller wants: the picker shows
+	// recent builds first, and Latest runs builds[0].
+	sort.Slice(builds, func(a, b int) bool {
+		return builds[a].InstalledAt.After(builds[b].InstalledAt)
+	})
+	return builds
+}
+
+// readTag recovers a build's release tag.
+//
+// Falls back to the directory name for a build installed before the marker
+// existed. That is right in practice as well as being the only option: safeTag
+// is the identity function on a real tag like v0.0.3.
+func readTag(dir, fallback string) string {
+	raw, err := os.ReadFile(filepath.Join(dir, tagMarker))
+	if err != nil {
+		return fallback
 	}
-	return state
+	if tag := strings.TrimSpace(string(raw)); tag != "" {
+		return tag
+	}
+	return fallback
+}
+
+// Remove deletes one build's files. A no-op for a build that is not installed.
+func (i *Installer) Remove(tag string) error {
+	if tag == "" {
+		return nil
+	}
+	dir := i.layout.VersionDir(tag)
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("remove %s: %w", dir, err)
+	}
+	return nil
 }
 
 // Installed reports whether tag is unpacked and has a game binary.
@@ -124,6 +186,13 @@ func (i *Installer) Install(ctx context.Context, accessToken string, release wca
 		return fmt.Errorf("%s contains no %s", asset.Name, GameBinary())
 	}
 
+	// Written into staging rather than after the rename, so a version directory
+	// is never observed without a tag beside it.
+	marker := filepath.Join(staging, tagMarker)
+	if err := os.WriteFile(marker, []byte(release.Tag+"\n"), 0o644); err != nil {
+		return fmt.Errorf("record the release tag: %w", err)
+	}
+
 	final := i.layout.VersionDir(release.Tag)
 	if err := os.RemoveAll(final); err != nil {
 		return fmt.Errorf("replace %s: %w", final, err)
@@ -134,10 +203,10 @@ func (i *Installer) Install(ctx context.Context, accessToken string, release wca
 
 	os.Remove(partial)
 
-	if err := i.setState(State{Tag: release.Tag}); err != nil {
-		return err
-	}
-	i.prune(release.Tag)
+	// Deliberately no prune here. Which builds may be reclaimed depends on what
+	// the player's profiles are pinned to, and a package that downloads and
+	// unpacks archives has no business reading profiles.json. The caller knows
+	// the keep set and calls Prune itself.
 
 	if report != nil {
 		report(Progress{Phase: "done", Percent: 100})
@@ -184,49 +253,42 @@ func (i *Installer) expectedHash(ctx context.Context, accessToken string, releas
 	return hash, nil
 }
 
-func (i *Installer) setState(state State) error {
-	raw, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode install state: %w", err)
+// Prune deletes installed builds that nothing needs, and reports what it took.
+//
+// keep names every build that must survive whatever happens — one per profile,
+// plus whatever is about to be launched. Beyond those, the `spare` most
+// recently installed builds are kept as well, because a build is tens of
+// megabytes and there is no reason to hoard them, but keeping a spare makes a
+// bad update recoverable by hand.
+//
+// The keep set is the whole point of the signature. The version a profile is
+// pinned to is not "an old build": it is the build that profile *is*, and
+// deleting it would silently turn a working profile into a re-download the
+// player never asked for.
+//
+// Safe to call without checking whether the game is running, because the only
+// caller refuses to install at all while it does — see UpdateService.Install.
+func (i *Installer) Prune(keep []string, spare int) []string {
+	protected := make(map[string]bool, len(keep))
+	for _, tag := range keep {
+		if tag != "" {
+			protected[tag] = true
+		}
 	}
-	if err := os.WriteFile(i.layout.StateFile(), raw, 0o644); err != nil {
-		return fmt.Errorf("write install state: %w", err)
-	}
-	return nil
-}
 
-// prune deletes old installs, keeping the current one and the most recent
-// other. Builds are tens of megabytes and there is no reason to hoard them,
-// but keeping one spare makes a bad update recoverable by hand.
-func (i *Installer) prune(current string) {
-	entries, err := os.ReadDir(i.layout.Versions)
-	if err != nil {
-		return
-	}
-
-	var others []os.DirEntry
-	currentDir := filepath.Base(i.layout.VersionDir(current))
-	for _, entry := range entries {
-		if !entry.IsDir() || entry.Name() == currentDir || strings.HasPrefix(entry.Name(), ".") {
+	var removed []string
+	kept := 0
+	for _, build := range i.List() { // newest first
+		if protected[build.Tag] {
 			continue
 		}
-		others = append(others, entry)
-	}
-
-	// Newest first, so the oldest are the ones dropped.
-	sort.Slice(others, func(a, b int) bool {
-		ia, errA := others[a].Info()
-		ib, errB := others[b].Info()
-		if errA != nil || errB != nil {
-			return others[a].Name() > others[b].Name()
-		}
-		return ia.ModTime().After(ib.ModTime())
-	})
-
-	for idx, entry := range others {
-		if idx < keptVersions-1 {
+		if kept < spare {
+			kept++
 			continue
 		}
-		_ = os.RemoveAll(filepath.Join(i.layout.Versions, entry.Name()))
+		if err := i.Remove(build.Tag); err == nil {
+			removed = append(removed, build.Tag)
+		}
 	}
+	return removed
 }

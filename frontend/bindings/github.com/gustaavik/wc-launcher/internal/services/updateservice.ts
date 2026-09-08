@@ -45,11 +45,12 @@ export function CancelLauncher(): $CancellablePromise<void> {
 }
 
 /**
- * Check reports what is installed and what is available.
+ * Check reports what the selected profile needs and whether it can play.
  * 
  * Never fails outright: a check that cannot reach the server still reports what
  * is installed, because an offline player with a build should still be able to
- * press Play.
+ * press Play. That is also why the forced update is gated on a *successful*
+ * check — see UpdateStatus.Required.
  */
 export function Check(): $CancellablePromise<$models.UpdateStatus> {
     return $Call.ByID(1881011116);

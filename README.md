@@ -22,6 +22,22 @@ updates.
                      WYVEN_DATA_DIR = <data>    (finds saves/)
 ```
 
+## Signing in is optional
+
+The launcher opens on the home screen whether or not anyone is signed in, and a
+build already on disk plays straight away. Playing signed out means singleplayer
+only — the game enforces that itself, greying out its Multiplayer button and
+refusing the connect path on the same `can_play_multiplayer` check.
+
+An account buys exactly two things: playing with other people, and downloading.
+The game repository is private and wcauthserver brokers every release download
+against the player's own token, so installing or updating a build is the one
+action that asks for a sign-in — and it says so on the button rather than
+failing after the click.
+
+The launcher signs in; it never signs up. Accounts are created at
+**[wyvencraft.com](https://wyvencraft.com)**.
+
 ## On disk
 
 Everything lives under one root — `~/Library/Application Support/Wyvencraft`
@@ -30,18 +46,41 @@ otherwise:
 
 ```
 launcher.json      launcher settings (account server, log filter)
-installed.json     which build is installed
+profiles.json      the player's profiles, and which one is selected
 versions/<tag>/    an installed build: the wyvencraft binary plus assets/
 data/              the game's WYVEN_DATA_DIR
   saves/  profile.toml  authkeys.toml  ops.toml
 logs/              launcher.log, game.log
+runtime/moltenvk/  the Vulkan driver the launcher installs on the game's behalf
 launcher-update/   a downloaded launcher, until it replaces the running one
 ```
 
 `versions/` and `data/` are separate on purpose: applying an update replaces a
 whole version directory, so nothing that must survive one may live inside it.
+`runtime/` and `launcher-update/` are outside it for the same reason.
 The game agrees with this layout — its `src/paths.rs` resolves the same default,
 so starting it by hand finds the same worlds.
+
+There is no index of what is installed. `versions/` *is* the record: each build
+carries a `.wyvencraft-tag` file naming the release it came from, because the
+directory name is a sanitised tag and that sanitising is lossy. A build removed
+by hand simply stops being listed, with nothing left to fall out of sync.
+
+## Profiles
+
+A profile is a name bound to a version. **Latest** is built in, is the default,
+and cannot be renamed or deleted — it always runs the newest release, and while
+it is selected the launcher will not start an older build: the Play button
+becomes **Update & Play** until the newest one is installed.
+
+That force is deliberately gated on *knowing*. If the account server cannot be
+reached, the newest release is unknown, and an unknown release must never become
+a locked door — an offline player still gets to play the build they have.
+
+Any other profile is pinned to one release and never updates itself. All
+profiles share the same `data/`, so saves are common to all of them: a profile
+chooses a build, not a world. A pinned build is never deleted to make room for a
+newer one, and deleting a profile leaves its build on disk.
 
 ## Running it
 
@@ -94,17 +133,18 @@ WCL_DEV_GAME_DIR=/tmp/wc-devgame \
 
 ## Layout
 
-| Package | What it owns |
-| --- | --- |
-| `internal/paths` | The directory layout above. Must agree with the game's `src/paths.rs` |
-| `internal/wcauth` | The account-server client: login, refresh, logout, keys, releases |
-| `internal/profile` | `profile.toml` and `authkeys.toml` — the handoff to the game |
-| `internal/install` | Asset selection, resumable download, checksum, unpack |
-| `internal/selfupdate` | The launcher's own update: GitHub releases, staging, the swap |
-| `internal/version` | Which build this is, stamped in by the release workflow |
-| `internal/gamesvc` | Child environment, Vulkan discovery, spawn, stderr streaming |
-| `internal/markdown` | Release notes → HTML, with raw HTML dropped |
-| `internal/services` | The three objects the frontend calls, and the session rules |
+| Package               | What it owns                                                                |
+| --------------------- | --------------------------------------------------------------------------- |
+| `internal/paths`      | The directory layout above. Must agree with the game's `src/paths.rs`       |
+| `internal/profiles`   | `profiles.json`: the profile list and the selection. Not `internal/profile` |
+| `internal/wcauth`     | The account-server client: login, refresh, logout, keys, releases           |
+| `internal/profile`    | `profile.toml` and `authkeys.toml` — the handoff to the game                |
+| `internal/install`    | Asset selection, resumable download, checksum, unpack, prune                |
+| `internal/selfupdate` | The launcher's own update: GitHub releases, staging, the swap               |
+| `internal/version`    | Which build this is, stamped in by the release workflow                     |
+| `internal/gamesvc`    | Child environment, Vulkan discovery, spawn, stderr streaming                |
+| `internal/markdown`   | Release notes → HTML, with raw HTML dropped                                 |
+| `internal/services`   | The three objects the frontend calls, and the session rules                 |
 
 ## Updating the launcher itself
 
@@ -145,14 +185,14 @@ never offers to update itself.
 
 Six repository secrets, all macOS signing:
 
-| Secret | What |
-| --- | --- |
-| `MACOS_CERT_P12` | base64 of the exported Developer ID Application `.p12` |
-| `MACOS_CERT_PASSWORD` | its export password |
-| `MACOS_SIGN_IDENTITY` | `Developer ID Application: … (S6EF64ZEMD)` |
-| `APPLE_API_KEY_P8` | base64 of the App Store Connect `.p8` |
-| `APPLE_API_KEY_ID` | that key's id |
-| `APPLE_API_ISSUER_ID` | the issuer id |
+| Secret                | What                                                   |
+| --------------------- | ------------------------------------------------------ |
+| `MACOS_CERT_P12`      | base64 of the exported Developer ID Application `.p12` |
+| `MACOS_CERT_PASSWORD` | its export password                                    |
+| `MACOS_SIGN_IDENTITY` | `Developer ID Application: … (S6EF64ZEMD)`             |
+| `APPLE_API_KEY_P8`    | base64 of the App Store Connect `.p8`                  |
+| `APPLE_API_KEY_ID`    | that key's id                                          |
+| `APPLE_API_ISSUER_ID` | the issuer id                                          |
 
 The workflow runs only on `release: published` and `workflow_dispatch`, both of
 which execute in this repository's own context. **Do not add a `pull_request`
@@ -173,11 +213,30 @@ is re-read from disk once the game exits.
 
 ## Vulkan on macOS
 
-The game renders through MoltenVK, and the release tarball does not bundle it.
-The launcher looks for a driver (Homebrew, `/usr/local`, `$VULKAN_SDK`, or a
-`MoltenVK/` directory inside the build) and sets `VK_ICD_FILENAMES`,
-`VK_DRIVER_FILES` and `DYLD_LIBRARY_PATH`. If none is found it refuses to launch
-and suggests `brew install molten-vk vulkan-loader`, which is more useful than a
-crash inside the loader.
+The game renders through MoltenVK, and nobody should have to install Homebrew to
+play a game. The launcher installs the driver itself: `internal/deps` downloads a
+pinned, checksummed build into `runtime/moltenvk/<version>/` beside `versions/`,
+alongside the game and again at launch if it turns out to be missing. Roughly
+3 MB, and invisible unless the connection is slow enough to want a progress bar.
+
+`internal/gamesvc` then points the child at it with `VK_ICD_FILENAMES`,
+`VK_DRIVER_FILES` and `DYLD_LIBRARY_PATH`, preferring, in order: whatever the
+launcher's own environment already sets (a developer's shell), a `MoltenVK/`
+directory inside the build, the launcher-managed copy, Homebrew, `/usr/local`,
+`$VULKAN_SDK`.
+
+`DYLD_LIBRARY_PATH` is the one that matters. vulkano tries `libvulkan.dylib`,
+`libvulkan.1.dylib` and then `libMoltenVK.dylib`, so it reaches the driver with
+no Vulkan loader installed at all; the ICD manifest is written beside the dylib
+for the case where a loader is present and gets there first. Both are set, and
+they land on the same driver either way.
+
+The version is pinned in `internal/deps/deps.go` and the archive is published by
+`.github/workflows/moltenvk.yml` under its own `deps/moltenvk-<version>` tag —
+not a launcher release, because the driver changes on its own schedule. Bumping
+it means running that workflow and pasting back the checksum it prints.
+
+Only if all of that fails does the launcher refuse to start the game, which is
+still more useful than a crash inside the loader.
 
 [wcauthserver]: https://github.com/gustaavik/wcauthserver

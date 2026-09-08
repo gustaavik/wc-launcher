@@ -184,3 +184,91 @@ func asError(err error, target **Error) bool {
 	}
 	return ok
 }
+
+func TestReleasesUnwrapsTheEnvelopedList(t *testing.T) {
+	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/releases" {
+			t.Errorf("asked for %q, want /api/v1/releases", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer at" {
+			t.Errorf("Authorization = %q, want a bearer token", got)
+		}
+		w.Write([]byte(`{"status":"ok","data":{"releases":[
+			{"tag":"v0.0.3","name":"v0.0.3","notes":"newest","published_at":"2026-08-19T19:51:33Z",
+			 "prerelease":false,"assets":[{"id":"1","name":"a.tar.gz","size":"10","digest":null}]},
+			{"tag":"v0.0.2","name":"v0.0.2","notes":"older","published_at":null,
+			 "prerelease":true,"assets":[]}]}}`))
+	})
+
+	releases, err := client.Releases(context.Background(), "at")
+	if err != nil {
+		t.Fatalf("Releases: %v", err)
+	}
+	if len(releases) != 2 {
+		t.Fatalf("want two releases, got %d", len(releases))
+	}
+	if releases[0].Tag != "v0.0.3" {
+		t.Errorf("want newest first, got %q", releases[0].Tag)
+	}
+	// A prerelease is real and downloadable; the launcher labels it rather than
+	// the client hiding it.
+	if !releases[1].Prerelease {
+		t.Error("the prerelease flag should survive decoding")
+	}
+	if releases[0].Assets[0].SizeBytes() != 10 {
+		t.Errorf("size should decode from its string form, got %d", releases[0].Assets[0].SizeBytes())
+	}
+}
+
+// A repository with nothing published is an empty list, not an error: a player
+// should be told "no builds yet", not "something went wrong".
+func TestAnEmptyReleaseListIsNotAnError(t *testing.T) {
+	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"status":"ok","data":{"releases":[]}}`))
+	})
+
+	releases, err := client.Releases(context.Background(), "at")
+	if err != nil {
+		t.Fatalf("Releases: %v", err)
+	}
+	if len(releases) != 0 {
+		t.Fatalf("want an empty list, got %v", releases)
+	}
+}
+
+// A server with no GitHub credential answers an enveloped 501. That is a
+// refusal the UI can explain, not a transport failure.
+func TestReleasesReportsAServerWithoutDownloadsAsARefusal(t *testing.T) {
+	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotImplemented)
+		w.Write([]byte(`{"status":"error","message":"game downloads are not configured on this server","code":"releases_not_configured"}`))
+	})
+
+	_, err := client.Releases(context.Background(), "at")
+	var refused *Error
+	if !asError(err, &refused) {
+		t.Fatalf("want a *wcauth.Error, got %T (%v)", err, err)
+	}
+	if refused.Code != "releases_not_configured" {
+		t.Errorf("Code = %q, want releases_not_configured", refused.Code)
+	}
+	if Unreachable(err) {
+		t.Error("a server that answered is not unreachable")
+	}
+}
+
+// An account server predating this route answers a bare 404. That must be a
+// refusal too, not a crash — the launcher may be pointed at an older server.
+func TestReleasesOnAServerThatDoesNotOfferTheRouteIsARefusal(t *testing.T) {
+	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+
+	_, err := client.Releases(context.Background(), "at")
+	if err == nil {
+		t.Fatal("want an error from a server without the route")
+	}
+	if Unreachable(err) {
+		t.Error("a 404 is an answer, not an outage")
+	}
+}

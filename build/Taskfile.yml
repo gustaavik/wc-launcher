@@ -190,15 +190,32 @@ tasks:
     cmds:
       - wails3 generate bindings -f '{{.BUILD_FLAGS}}' -clean=true{{if eq .OBFUSCATED "true"}} -obfuscated{{end}} -ts -i
 
+  generate:appicon:assets:
+    summary: Derives the Icon Composer layer and the in-app logo from `appicon.png`, stripping the near-transparent film the artwork ships with.
+    run: once
+    dir: '{{.ROOT_DIR}}'
+    sources:
+      - "build/appicon.png"
+      - "tools/iconprep/main.go"
+    generates:
+      - "build/appicon.icon/Assets/appicon.png"
+      - "frontend/public/logo.png"
+    cmds:
+      - go run ./tools/iconprep
+
   generate:icons:
     summary: Generates Windows `.ico` and Mac `.icns` from an image; on macOS, `-iconcomposerinput appicon.icon -macassetdir darwin` also produces `Assets.car` from a `.icon` file (skipped on other platforms).
     run: once
     dir: build
+    deps:
+      - task: generate:appicon:assets
     sources:
       - "appicon.png"
-      - "appicon.icon"
+      - "appicon.icon/icon.json"
+      - "appicon.icon/Assets/**/*"
     generates:
       - "darwin/icons.icns"
+      - "darwin/Assets.car"
       - "windows/icon.ico"
     cmds:
       - wails3 generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icon.ico -iconcomposerinput appicon.icon -macassetdir darwin

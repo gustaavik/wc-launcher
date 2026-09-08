@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import Home from "./lib/Home.svelte";
   import Login from "./lib/Login.svelte";
+  import Profiles from "./lib/Profiles.svelte";
   import Settings from "./lib/Settings.svelte";
   import { launcher } from "./lib/state.svelte";
 
@@ -13,13 +14,15 @@
 
 {#if launcher.route === "loading"}
   <div class="splash">
-    <div class="mark" aria-hidden="true"></div>
+    <img class="mark" src="/logo.png" alt="" draggable="false" />
     <p>Starting…</p>
   </div>
 {:else if launcher.route === "login"}
   <Login />
 {:else if launcher.route === "settings"}
   <Settings />
+{:else if launcher.route === "profiles"}
+  <Profiles />
 {:else}
   <Home />
 {/if}
@@ -38,15 +41,23 @@
   .mark {
     width: 44px;
     height: 44px;
-    border-radius: 10px;
-    background: var(--grad);
+    display: block;
+    object-fit: contain;
+    -webkit-user-drag: none;
     animation: pulse 1.6s ease-in-out infinite;
   }
   @keyframes pulse {
-    0%, 100% { opacity: 0.45; }
-    50% { opacity: 1; }
+    0%,
+    100% {
+      opacity: 0.45;
+    }
+    50% {
+      opacity: 1;
+    }
   }
   @media (prefers-reduced-motion: reduce) {
-    .mark { animation: none; }
+    .mark {
+      animation: none;
+    }
   }
 </style>

@@ -40,6 +40,9 @@ type Options struct {
 	VersionDir string
 	// LogFilter becomes RUST_LOG. Empty means the game's own default.
 	LogFilter string
+	// MoltenVKDir is where the launcher installed the Vulkan driver, if it
+	// has. Empty leaves the probe to whatever else is on the machine.
+	MoltenVKDir string
 }
 
 // buildEnv returns the child's complete environment.
