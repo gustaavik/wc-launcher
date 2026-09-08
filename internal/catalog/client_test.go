@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,7 +42,7 @@ func TestIndexIsFetchedFromTheCataloguePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Index: %v", err)
 	}
-	if want := "/" + DefaultPrefix + "/index.json"; path != want {
+	if want := "/" + DefaultBucket + "/" + DefaultPrefix + "/index.json"; path != want {
 		t.Errorf("requested %q, want %q", path, want)
 	}
 	if len(got.Releases) != 1 || got.Releases[0].Tag != "v0.5.0" {
@@ -133,13 +134,38 @@ func TestAnUnknownSchemaVersionIsRefused(t *testing.T) {
 	}
 }
 
-func TestAssetURLJoinsThePathOntoTheConfiguredBase(t *testing.T) {
+func TestAssetURLJoinsThePathOntoTheBucket(t *testing.T) {
 	client := New("https://mirror.example.com/")
 	asset := Asset{Path: "game/v0.5.0/wyvencraft-v0.5.0-aarch64-apple-darwin.tar.gz"}
 
-	want := "https://mirror.example.com/game/v0.5.0/wyvencraft-v0.5.0-aarch64-apple-darwin.tar.gz"
+	// The bucket segment is the part that is easy to lose: an asset path is
+	// relative to the bucket, not to the endpoint, and joining it onto the
+	// endpoint 404s every download while looking almost right.
+	want := "https://mirror.example.com/releases/game/v0.5.0/wyvencraft-v0.5.0-aarch64-apple-darwin.tar.gz"
 	if got := client.AssetURL(asset); got != want {
 		t.Errorf("AssetURL = %q, want %q", got, want)
+	}
+}
+
+// The invariant behind the bug above: whatever the catalogue is fetched from,
+// its assets hang off the same root. Asserted by construction rather than by
+// restating either URL, so it cannot be satisfied by copying the code.
+func TestTheCatalogueAndItsAssetsShareOneRoot(t *testing.T) {
+	var indexURL string
+	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		indexURL = r.URL.Path
+		_, _ = w.Write([]byte(body(t)))
+	})
+
+	index, err := client.Index(context.Background())
+	if err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+	assetURL := strings.TrimPrefix(client.AssetURL(index.Releases[0].Assets[0]), client.BaseURL())
+
+	root := path.Dir(path.Dir(indexURL)) + "/" // strip "<prefix>/index.json"
+	if !strings.HasPrefix(assetURL, root) {
+		t.Errorf("the index is under %q but its assets are at %q", root, assetURL)
 	}
 }
 
@@ -232,12 +258,26 @@ func TestTheWorkflowsOwnOutputParses(t *testing.T) {
 		t.Errorf("notes did not survive: %q", latest.Notes)
 	}
 
-	// And the asset an installer would actually reach for.
-	asset := latest.Assets[0]
+	// And the asset an installer would actually reach for. By name, not by
+	// position: the workflow's asset order follows a shell glob.
+	var asset Asset
+	for _, candidate := range latest.Assets {
+		if strings.HasSuffix(candidate.Name, "aarch64-apple-darwin.tar.gz") {
+			asset = candidate
+		}
+	}
+	if asset.Name == "" {
+		t.Fatal("the fixture has no macOS arm64 archive")
+	}
 	if asset.Size == 0 || len(asset.SHA256) != 64 {
 		t.Errorf("asset is not installable: %+v", asset)
 	}
-	if want := "https://s3.wyvencraft.com/" + asset.Path; New("").AssetURL(asset) != want {
-		t.Errorf("AssetURL = %q, want %q", New("").AssetURL(asset), want)
+	// Spelled out in full rather than rebuilt from the same pieces the code
+	// uses. An earlier version of this assertion was written from the
+	// implementation and happily confirmed a URL that 404s.
+	const want = "https://s3.wyvencraft.com/releases/game/v0.5.0/" +
+		"wyvencraft-v0.5.0-aarch64-apple-darwin.tar.gz"
+	if got := New("").AssetURL(asset); got != want {
+		t.Errorf("AssetURL = %q, want %q", got, want)
 	}
 }

@@ -15,10 +15,18 @@ import (
 // DefaultURL is the object store the release workflow publishes to.
 const DefaultURL = "https://s3.wyvencraft.com"
 
-// DefaultPrefix is the bucket and key prefix the game's builds live under:
-// bucket "releases", prefix "game/". Everything below it is public to read and
-// private to list.
-const DefaultPrefix = "releases/game"
+// DefaultBucket holds the published builds. Public to read, private to list.
+const DefaultBucket = "releases"
+
+// DefaultPrefix is the key prefix within the bucket. Asset paths in the index
+// are relative to the bucket, so they begin with this.
+//
+// Bucket and prefix are separate on purpose, and folding them into one string
+// is a mistake that costs an afternoon: the index is fetched at
+// <base>/<bucket>/<prefix>/index.json, but an asset is at <base>/<bucket>/<path>
+// — the path already carries the prefix, and joining it onto <base> instead
+// silently drops the bucket and 404s every download.
+const DefaultPrefix = "game"
 
 // requestTimeout bounds a catalogue fetch. The index is a few tens of
 // kilobytes; the archives themselves go through install.Fetch, which has its
@@ -63,6 +71,7 @@ func (e *Error) Error() string {
 // Client reads the catalogue. Safe for concurrent use.
 type Client struct {
 	baseURL string
+	bucket  string
 	prefix  string
 	http    *http.Client
 }
@@ -75,6 +84,7 @@ func New(baseURL string) *Client {
 	}
 	return &Client{
 		baseURL: baseURL,
+		bucket:  DefaultBucket,
 		prefix:  DefaultPrefix,
 		http:    &http.Client{Timeout: requestTimeout},
 	}
@@ -83,13 +93,17 @@ func New(baseURL string) *Client {
 // BaseURL is the object store this client reads from.
 func (c *Client) BaseURL() string { return c.baseURL }
 
+// bucketURL is the root every published object hangs off, and the one thing
+// the catalogue and its assets must agree on.
+func (c *Client) bucketURL() string { return c.baseURL + "/" + c.bucket }
+
 // AssetURL is where one asset can be downloaded from.
 //
 // A pure function of the base and the asset's bucket-relative path — there is
 // no link to broker and nothing to expire, which is why install.Installer no
 // longer needs a client at all.
 func (c *Client) AssetURL(asset Asset) string {
-	return c.baseURL + "/" + asset.Path
+	return c.bucketURL() + "/" + asset.Path
 }
 
 // Index fetches the catalogue.
@@ -98,7 +112,7 @@ func (c *Client) AssetURL(asset Asset) string {
 // exists but publishes nothing is a deployment mistake, and reporting it as
 // "no updates available" would make a broken launcher look up to date.
 func (c *Client) Index(ctx context.Context) (Index, error) {
-	url := c.baseURL + "/" + c.prefix + "/index.json"
+	url := c.bucketURL() + "/" + c.prefix + "/index.json"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
