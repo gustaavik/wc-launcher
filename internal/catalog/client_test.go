@@ -281,3 +281,48 @@ func TestTheWorkflowsOwnOutputParses(t *testing.T) {
 		t.Errorf("AssetURL = %q, want %q", got, want)
 	}
 }
+
+// The launcher is exactly the client bot protection targets: no browser, no
+// JavaScript. A challenge must say so rather than looking like a bucket that
+// refused us, which is a different problem with a different fix.
+func TestACDNBotChallengeIsNamedForWhatItIs(t *testing.T) {
+	for _, code := range []int{http.StatusForbidden, http.StatusOK, http.StatusServiceUnavailable} {
+		client := serve(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("cf-mitigated", "challenge")
+			w.Header().Set("content-type", "text/html; charset=UTF-8")
+			w.WriteHeader(code)
+			_, _ = w.Write([]byte(`<!DOCTYPE html><title>Just a moment...</title>`))
+		})
+
+		_, err := client.Index(context.Background())
+		if err == nil {
+			t.Fatalf("HTTP %d: a challenge page was accepted as a catalogue", code)
+		}
+		if !errors.Is(err, ErrChallenged) {
+			t.Errorf("HTTP %d: got %v, want ErrChallenged", code, err)
+		}
+		// Not "the bucket refused us" — that would send someone to the wrong fix.
+		var refusal *Error
+		if errors.As(err, &refusal) {
+			t.Errorf("HTTP %d: reported as a bucket refusal: %v", code, refusal)
+		}
+	}
+}
+
+// A real object-store refusal must keep reading as one.
+func TestAnOriginRefusalIsNotMistakenForAChallenge(t *testing.T) {
+	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("x-amz-request-id", "18D371838E04B50274220015")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`<Error><Code>AccessDenied</Code></Error>`))
+	})
+
+	_, err := client.Index(context.Background())
+	if errors.Is(err, ErrChallenged) {
+		t.Errorf("an AccessDenied from the origin was reported as a CDN challenge: %v", err)
+	}
+	var refusal *Error
+	if !errors.As(err, &refusal) || refusal.Code != "AccessDenied" {
+		t.Errorf("got %v, want an AccessDenied refusal", err)
+	}
+}

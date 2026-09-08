@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/gustaavik/wc-launcher/internal/catalog"
 )
 
 // Progress reports how a download is going.
@@ -71,6 +73,14 @@ func Fetch(ctx context.Context, url, path string, expectSize int64, report Progr
 		return fmt.Errorf("download: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// Before the status is read. A bot check can answer with any status, and a
+	// 200 one would otherwise be written to disk as the archive — where the
+	// only thing that catches it is the checksum, which then reports a
+	// mismatch and sends the player looking for corruption that is not there.
+	if catalog.Challenged(resp.Header) {
+		return fmt.Errorf("%w (%s)", catalog.ErrChallenged, req.URL.Host)
+	}
 
 	appending := false
 	switch resp.StatusCode {
