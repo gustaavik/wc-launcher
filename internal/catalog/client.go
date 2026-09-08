@@ -47,6 +47,25 @@ var ErrUnreachable = errors.New("could not reach the download server")
 // Unreachable reports whether err is an outage rather than a refusal.
 func Unreachable(err error) bool { return errors.Is(err, ErrUnreachable) }
 
+// ErrChallenged reports that a CDN bot check answered instead of the object
+// store — the launcher never reached it.
+//
+// Worth its own error because the launcher is exactly the client bot
+// protection targets: no browser, no JavaScript, nothing that can solve a
+// challenge. Left unrecognised it is genuinely misleading rather than merely
+// unhelpful: a challenge served with 403 reads as a bucket that refused us,
+// and one served with 200 is written to disk as the archive and surfaces as a
+// checksum mismatch — which reads as corruption or tampering. Both send
+// whoever is debugging it somewhere the problem is not.
+var ErrChallenged = errors.New(
+	"the download server asked for a browser check, which the launcher cannot answer")
+
+// Challenged reports whether a CDN bot check stood in for the real response.
+//
+// Cloudflare sets cf-mitigated on anything it intercepts, and the object store
+// never does, so the header alone settles which of the two answered.
+func Challenged(h http.Header) bool { return h.Get("cf-mitigated") != "" }
+
 // Error is a refusal: the object store answered, and the answer was no.
 //
 // Code is S3's error code — "NoSuchBucket" before the bucket exists,
@@ -125,6 +144,12 @@ func (c *Client) Index(ctx context.Context) (Index, error) {
 		return Index{}, fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
 	defer resp.Body.Close()
+
+	// Before the status is read, because a challenge is not always a 4xx and a
+	// 200-shaped one would otherwise be parsed as a catalogue.
+	if Challenged(resp.Header) {
+		return Index{}, fmt.Errorf("%w (%s)", ErrChallenged, c.baseURL)
+	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 	if err != nil {
