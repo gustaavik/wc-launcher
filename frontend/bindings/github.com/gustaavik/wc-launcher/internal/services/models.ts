@@ -166,16 +166,14 @@ export interface ReleaseView {
 
 /**
  * ServerInfo reports what the account server supports.
+ * 
+ * Only about signing in. Whether builds can be downloaded is no longer this
+ * server's business, so it is deliberately not reported here — the update check
+ * answers that, against the catalogue.
  */
 export interface ServerInfo {
     "reachable": boolean;
     "version": string;
-
-    /**
-     * UpdatesEnabled is false when the server brokers no downloads, so the UI
-     * can say so rather than offering a button that answers 501.
-     */
-    "updatesEnabled": boolean;
     "message": string;
 }
 
@@ -212,9 +210,11 @@ export interface SettingsView {
  * 	pinned v2   v2        v4          Play
  * 	pinned v2   —         v4          Install
  * 
- * Signed out, "published" is always unknown, so a build on disk means Play and
- * no build means the player is asked to sign in — downloading is the one thing
- * an account is needed for.
+ * Signing in does not appear in it. The catalogue is public, so a signed-out
+ * player installs and plays exactly like a signed-in one; what an account buys
+ * is multiplayer, which the game enforces itself by having no ticket to
+ * present. "Published" is unknown only when the catalogue cannot be read, and
+ * that must never become a lockout.
  */
 export interface UpdateStatus {
     /**

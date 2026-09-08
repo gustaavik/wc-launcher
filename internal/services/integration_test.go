@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gustaavik/wc-launcher/internal/catalog"
 	"github.com/gustaavik/wc-launcher/internal/config"
 	"github.com/gustaavik/wc-launcher/internal/gamesvc"
 	"github.com/gustaavik/wc-launcher/internal/install"
@@ -38,7 +39,11 @@ func integrationEnv(t *testing.T) (url, username, password string) {
 
 // testCore builds a Core rooted in a temp directory, so a run never touches the
 // real Wyvencraft install.
-func testCore(t *testing.T, authURL string) *Core {
+//
+// The account server and the catalogue are separate arguments because they are
+// separate servers: a test can point at a live catalogue with no account, or at
+// a dead one with a working sign-in.
+func testCore(t *testing.T, authURL, catalogURL string) *Core {
 	t.Helper()
 	root := t.TempDir()
 	layout := paths.Layout{
@@ -59,27 +64,39 @@ func testCore(t *testing.T, authURL string) *Core {
 		Layout:   layout,
 		Runner:   runner,
 		Client:   client,
+		Catalog:  catalog.New(catalogURL),
 		Settings: config.Settings{AuthURL: authURL},
 	}
 	core.Session = NewSession(layout, client, runner.Running)
-	core.Install = install.New(layout, client)
+	core.Install = install.New(layout)
 	core.Profiles = profiles.Open(layout.ProfilesFile())
 	return core
 }
 
 func TestEndToEndSignInAndInstall(t *testing.T) {
 	authURL, username, password := integrationEnv(t)
-	core := testCore(t, authURL)
+	core := testCore(t, authURL, os.Getenv(catalogURLVar))
 	auth := NewAuthService(core)
 	updates := NewUpdateService(core)
 
-	t.Run("the server advertises downloads", func(t *testing.T) {
+	t.Run("the account server is reachable", func(t *testing.T) {
 		info := updates.Server()
 		if !info.Reachable {
 			t.Fatalf("server unreachable: %s", info.Message)
 		}
-		if !info.UpdatesEnabled {
-			t.Fatal("updates_enabled is false; set GITHUB_RELEASES_TOKEN on the server")
+	})
+
+	t.Run("the catalogue publishes a build for this platform", func(t *testing.T) {
+		index, err := core.Catalog.Index(t.Context())
+		if err != nil {
+			t.Fatalf("catalogue at %s: %v", core.Catalog.BaseURL(), err)
+		}
+		latest, ok := index.Latest()
+		if !ok {
+			t.Fatal("the catalogue publishes no non-prerelease build")
+		}
+		if _, err := install.SelectAsset(latest); err != nil {
+			t.Fatalf("%s: %v", latest.Tag, err)
 		}
 	})
 

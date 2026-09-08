@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/gustaavik/wc-launcher/internal/catalog"
 	"github.com/gustaavik/wc-launcher/internal/config"
 	"github.com/gustaavik/wc-launcher/internal/gamesvc"
 	"github.com/gustaavik/wc-launcher/internal/install"
@@ -82,9 +83,11 @@ type ReleaseOption struct {
 //	pinned v2   v2        v4          Play
 //	pinned v2   —         v4          Install
 //
-// Signed out, "published" is always unknown, so a build on disk means Play and
-// no build means the player is asked to sign in — downloading is the one thing
-// an account is needed for.
+// Signing in does not appear in it. The catalogue is public, so a signed-out
+// player installs and plays exactly like a signed-in one; what an account buys
+// is multiplayer, which the game enforces itself by having no ticket to
+// present. "Published" is unknown only when the catalogue cannot be read, and
+// that must never become a lockout.
 type UpdateStatus struct {
 	// Profile is the selection, so the UI never has to join two calls.
 	Profile ProfileView `json:"profile"`
@@ -130,6 +133,10 @@ type Core struct {
 	Install  *install.Installer
 	Profiles *profiles.Store
 	Client   *wcauth.Client
+	// Catalog is where game builds come from. Separate from Client because it
+	// is a different server with a different job: identity is per-deployment,
+	// the published builds are not.
+	Catalog  *catalog.Client
 	Launcher *selfupdate.Client
 	Settings config.Settings
 	// Quit shuts the launcher down. Set by main once the app exists; nil in
@@ -151,24 +158,24 @@ type Core struct {
 	// clock the Latest profile is measured against. Nil until one succeeds,
 	// which is exactly what keeps an offline launcher playable rather than
 	// locked behind an update it cannot see.
-	latest *wcauth.Release
+	latest *catalog.Release
 }
 
 // knownLatest is the newest release the launcher has actually seen.
 //
 // The second return distinguishes "we know, and it is this" from "we have not
 // been able to look" — a distinction the forced update depends on.
-func (c *Core) knownLatest() (wcauth.Release, bool) {
+func (c *Core) knownLatest() (catalog.Release, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.latest == nil {
-		return wcauth.Release{}, false
+		return catalog.Release{}, false
 	}
 	return *c.latest, true
 }
 
 // setKnownLatest records, or with nil forgets, the newest release.
-func (c *Core) setKnownLatest(release *wcauth.Release) {
+func (c *Core) setKnownLatest(release *catalog.Release) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.latest = release
@@ -185,15 +192,24 @@ func NewCore(layout paths.Layout, emitter Emitter) *Core {
 		Emitter:  emitter,
 		Runner:   runner,
 		Client:   client,
+		Catalog:  catalog.New(os.Getenv(catalogURLVar)),
 		Launcher: selfupdate.NewClient(""),
 		Settings: settings,
 	}
 	core.Session = NewSession(layout, client, runner.Running)
-	core.Install = install.New(layout, client)
+	core.Install = install.New(layout)
 	core.Profiles = profiles.Open(layout.ProfilesFile())
 	migrate(layout)
 	return core
 }
+
+// catalogURLVar points the launcher at a different catalogue.
+//
+// A developer affordance, in the same spirit as WCL_DEV_GAME_DIR, rather than a
+// setting in launcher.json: the account server is configurable because changing
+// it changes who you are and invalidates the session, and none of that is true
+// of where the builds are read from.
+const catalogURLVar = "WCL_CATALOG_URL"
 
 // migrate clears state the launcher no longer keeps.
 //
@@ -223,13 +239,6 @@ func toProfileView(profile profiles.Profile, installer *install.Installer) Profi
 	return view
 }
 
-// newInstaller rebuilds the installer against the Core's current client.
-// Needed when the account server changes: the installer resolves download URLs
-// through it.
-func newInstaller(c *Core) *install.Installer {
-	return install.New(c.Layout, c.Client)
-}
-
 func (c *Core) emit(name string, data any) {
 	if c.Emitter != nil {
 		c.Emitter.Emit(name, data)
@@ -243,7 +252,7 @@ func toAccountView(account *wcauth.Account) *AccountView {
 	return &AccountView{ID: account.ID, Username: account.Username}
 }
 
-func toReleaseView(release wcauth.Release) ReleaseView {
+func toReleaseView(release catalog.Release) ReleaseView {
 	return ReleaseView{
 		Tag:         release.Tag,
 		Name:        release.Name,
@@ -267,6 +276,13 @@ func userMessage(err error) string {
 	var refused *wcauth.Error
 	if errors.As(err, &refused) {
 		return refused.Error()
+	}
+	if catalog.Unreachable(err) {
+		return "Could not reach the download server. Check your connection and try again."
+	}
+	var unpublished *catalog.Error
+	if errors.As(err, &unpublished) {
+		return unpublished.Error()
 	}
 	if selfupdate.Unreachable(err) {
 		return "Could not reach GitHub. Check your connection and try again."

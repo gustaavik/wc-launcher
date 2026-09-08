@@ -133,11 +133,9 @@ func (a *AuthService) SaveSettings(authURL, logFilter string) LoginResult {
 	client := wcauth.New(settings.ResolvedAuthURL())
 	a.core.Client = client
 	a.core.Session.SetClient(client)
-	a.core.Install = newInstaller(a.core)
-	// A different server has a different release list, and the cached "newest
-	// release" is what the Latest profile is measured against. Keeping it would
-	// force an update to a tag the new server has never heard of.
-	a.core.setKnownLatest(nil)
+	// The installer and the cached "newest release" are deliberately left
+	// alone: builds come from the catalogue, which is the same wherever the
+	// player signs in. Only identity changes here.
 	a.core.emit("auth:changed", nil)
 
 	// The stored token belongs to the old server.

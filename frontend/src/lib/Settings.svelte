@@ -68,7 +68,10 @@
         {#if settings}<code>{settings.defaultAuthUrl}</code>{/if}
       </p>
       <input bind:value={authUrl} placeholder={settings?.defaultAuthUrl ?? ""} spellcheck="false" />
-      <p class="hint">Changing this signs you out: a session belongs to one server.</p>
+      <p class="hint">
+        Changing this signs you out: a session belongs to one server. Game
+        downloads are unaffected — they do not come from here.
+      </p>
     </section>
 
     <section class="panel">
@@ -104,8 +107,8 @@
         </div>
       </div>
       <p class="hint">
-        The launcher updates itself from GitHub, separately from the game. It
-        does not need an account server, or an account.
+        The launcher updates itself from GitHub, separately from the game.
+        Neither download needs an account server, or an account.
       </p>
       {#if launcher.selfUpdate?.message}
         <p class="hint">{launcher.selfUpdate.message}</p>

@@ -9,21 +9,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gustaavik/wc-launcher/internal/catalog"
 	"github.com/gustaavik/wc-launcher/internal/paths"
-	"github.com/gustaavik/wc-launcher/internal/wcauth"
 )
 
-// The real v0.0.1 asset list, so the matcher is exercised against what the
-// release workflow actually publishes — including the .sha256 siblings it must
-// not mistake for archives.
-func realRelease() wcauth.Release {
-	return wcauth.Release{
-		Tag: "v0.0.1",
-		Assets: []wcauth.Asset{
-			{ID: "521286005", Name: "wyvencraft-v0.0.1-aarch64-apple-darwin.tar.gz", Size: "6708880", Digest: "sha256:5129"},
-			{ID: "521286006", Name: "wyvencraft-v0.0.1-aarch64-apple-darwin.tar.gz.sha256", Size: "112"},
-			{ID: "521289567", Name: "wyvencraft-v0.0.1-x86_64-apple-darwin.tar.gz", Size: "6967744", Digest: "sha256:98d4"},
-			{ID: "521289571", Name: "wyvencraft-v0.0.1-x86_64-apple-darwin.tar.gz.sha256", Size: "111"},
+// A real macOS-only asset list, so the matcher is exercised against what the
+// release workflow actually publishes. The catalogue does not list the .sha256
+// siblings, but one hand-written here keeps the matcher honest about them.
+func realRelease() catalog.Release {
+	const tag = "v0.0.1"
+	asset := func(name string, size int64) catalog.Asset {
+		return catalog.Asset{
+			Name:   name,
+			Path:   "game/" + tag + "/" + name,
+			Size:   size,
+			SHA256: "51295ab76d3e630c3efbc54e086203712c3cc76c80965ed9cbe90326336836d5",
+		}
+	}
+	return catalog.Release{
+		Tag: tag,
+		Assets: []catalog.Asset{
+			asset("wyvencraft-v0.0.1-aarch64-apple-darwin.tar.gz", 6708880),
+			asset("wyvencraft-v0.0.1-aarch64-apple-darwin.tar.gz.sha256", 112),
+			asset("wyvencraft-v0.0.1-x86_64-apple-darwin.tar.gz", 6967744),
+			asset("wyvencraft-v0.0.1-x86_64-apple-darwin.tar.gz.sha256", 111),
 		},
 	}
 }
@@ -69,8 +78,8 @@ func TestSelectAssetNeverPicksAChecksumSibling(t *testing.T) {
 // A release with no build for this platform must say so, rather than failing
 // later as a download error — retrying will never help.
 func TestAReleaseWithNoBuildForThisPlatformIsReportedClearly(t *testing.T) {
-	release := wcauth.Release{Tag: "v9.9.9", Assets: []wcauth.Asset{
-		{ID: "1", Name: "wyvencraft-v9.9.9-riscv64-unknown-linux-gnu.tar.gz"},
+	release := catalog.Release{Tag: "v9.9.9", Assets: []catalog.Asset{
+		{Name: "wyvencraft-v9.9.9-riscv64-unknown-linux-gnu.tar.gz"},
 	}}
 
 	_, err := SelectAsset(release)
@@ -80,23 +89,6 @@ func TestAReleaseWithNoBuildForThisPlatformIsReportedClearly(t *testing.T) {
 	}
 	if !strings.Contains(noBuild.Error(), "v9.9.9") {
 		t.Errorf("error should name the tag: %v", noBuild)
-	}
-}
-
-func TestChecksumAssetFindsTheSibling(t *testing.T) {
-	release := realRelease()
-	archive := release.Assets[0]
-
-	sibling, ok := ChecksumAsset(release, archive)
-	if !ok {
-		t.Fatal("sibling not found")
-	}
-	if sibling.Name != archive.Name+".sha256" {
-		t.Errorf("found %q", sibling.Name)
-	}
-
-	if _, ok := ChecksumAsset(wcauth.Release{}, archive); ok {
-		t.Error("an empty release should have no sibling")
 	}
 }
 
@@ -196,7 +188,7 @@ func TestListReportsEveryUnpackedBuildNewestFirst(t *testing.T) {
 	for _, tag := range []string{"v3", "v0.2", "v0.0.1"} {
 		installed(t, layout, tag, true)
 	}
-	i := New(layout, nil)
+	i := New(layout)
 
 	if got := tagsOf(i.List()); !reflect.DeepEqual(got, []string{"v3", "v0.2", "v0.0.1"}) {
 		t.Fatalf("want newest first, got %v", got)
@@ -210,7 +202,7 @@ func TestListReadsTheTagFromTheMarkerRatherThanTheDirectoryName(t *testing.T) {
 	const tag = "v1.0/beta" // safeTag mangles the slash
 	installed(t, layout, tag, true)
 
-	got := tagsOf(New(layout, nil).List())
+	got := tagsOf(New(layout).List())
 	if len(got) != 1 || got[0] != tag {
 		t.Fatalf("want the real tag %q back, got %v", tag, got)
 	}
@@ -222,7 +214,7 @@ func TestListFallsBackToTheDirectoryNameForABuildInstalledBeforeTheMarker(t *tes
 	layout := testLayout(t)
 	installed(t, layout, "v0.0.3", false)
 
-	got := tagsOf(New(layout, nil).List())
+	got := tagsOf(New(layout).List())
 	if len(got) != 1 || got[0] != "v0.0.3" {
 		t.Fatalf("want the legacy build recognised, got %v", got)
 	}
@@ -238,7 +230,7 @@ func TestListIgnoresStagingDirectoriesPartialDownloadsAndEmptyDirectories(t *tes
 		}
 	}
 
-	if got := tagsOf(New(layout, nil).List()); !reflect.DeepEqual(got, []string{"v0.0.1"}) {
+	if got := tagsOf(New(layout).List()); !reflect.DeepEqual(got, []string{"v0.0.1"}) {
 		t.Fatalf("want only the real build, got %v", got)
 	}
 }
@@ -287,7 +279,7 @@ func TestPruneNeverDeletesAKeptTag(t *testing.T) {
 				now := time.Now()
 				_ = os.Chtimes(layout.VersionDir(tag), now, now)
 			}
-			i := New(layout, nil)
+			i := New(layout)
 
 			i.Prune(tc.keep, tc.spare)
 
@@ -308,7 +300,7 @@ func TestPruneKeepsTheSpareMostRecentBuilds(t *testing.T) {
 		now := time.Now()
 		_ = os.Chtimes(layout.VersionDir(tag), now, now)
 	}
-	i := New(layout, nil)
+	i := New(layout)
 
 	removed := i.Prune(nil, 2)
 
@@ -321,7 +313,7 @@ func TestPruneKeepsTheSpareMostRecentBuilds(t *testing.T) {
 }
 
 func TestRemoveIsANoOpForABuildThatIsNotInstalled(t *testing.T) {
-	i := New(testLayout(t), nil)
+	i := New(testLayout(t))
 
 	if err := i.Remove("v9.9.9"); err != nil {
 		t.Fatalf("removing an absent build should be a no-op, got %v", err)
