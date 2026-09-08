@@ -5,16 +5,10 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/gustaavik/wc-launcher/internal/catalog"
 	"github.com/gustaavik/wc-launcher/internal/deps"
 	"github.com/gustaavik/wc-launcher/internal/install"
-	"github.com/gustaavik/wc-launcher/internal/wcauth"
 )
-
-// signInToDownload is the refusal a signed-out player gets from anything that
-// reaches the release broker. The game repository is private, so the account
-// server brokers every download against the player's own token — this is the
-// one thing playing offline cannot do.
-const signInToDownload = "Sign in to download Wyvencraft."
 
 // UpdateService checks for and installs game builds.
 type UpdateService struct{ core *Core }
@@ -23,10 +17,14 @@ func NewUpdateService(core *Core) *UpdateService { return &UpdateService{core: c
 
 // Check reports what the selected profile needs and whether it can play.
 //
-// Never fails outright: a check that cannot reach the server still reports what
-// is installed, because an offline player with a build should still be able to
-// press Play. That is also why the forced update is gated on a *successful*
-// check — see UpdateStatus.Required.
+// Never fails outright: a check that cannot reach the catalogue still reports
+// what is installed, because an offline player with a build should still be
+// able to press Play. That is also why the forced update is gated on a
+// *successful* check — see UpdateStatus.Required.
+//
+// Needs no access token, which is what lets it run while the game is running:
+// the one thing the launcher must not do then is touch the refresh token, and
+// reading a public catalogue does not.
 func (u *UpdateService) Check() UpdateStatus {
 	profile := u.core.Profiles.Selected()
 	status := UpdateStatus{
@@ -46,28 +44,15 @@ func (u *UpdateService) Check() UpdateStatus {
 	}
 	status.Playable = status.InstalledTag != ""
 
-	token, err := u.core.Session.AccessToken(context.Background())
+	index, err := u.core.Catalog.Index(context.Background())
 	if err != nil {
-		if errors.Is(err, ErrGameRunning) {
-			status.Message = "Wyvencraft is running."
-		} else if errors.Is(err, ErrSignedOut) {
-			// Two different situations, and telling them apart is the whole
-			// point: with a build on disk, being signed out costs updates and
-			// multiplayer. With none, it is the only thing in the way.
-			if status.Playable {
-				status.Message = "Playing offline. Sign in to check for updates."
-			} else {
-				status.Message = signInToDownload
-			}
-		} else {
-			status.Message = userMessage(err)
-		}
+		status.Message = userMessage(err)
 		return status
 	}
 
-	latest, err := u.core.Client.LatestRelease(context.Background(), token)
-	if err != nil {
-		status.Message = userMessage(err)
+	latest, ok := index.Latest()
+	if !ok {
+		status.Message = "No Wyvencraft builds are published yet."
 		return status
 	}
 	u.core.setKnownLatest(&latest)
@@ -77,7 +62,7 @@ func (u *UpdateService) Check() UpdateStatus {
 
 	target := latest
 	if !profile.IsLatest() {
-		found, err := u.releaseTagged(context.Background(), token, profile.Tag)
+		found, err := releaseTagged(index, profile.Tag)
 		if err != nil {
 			// The pin still points at a build that may well be installed, so
 			// this is a message, not a downgrade to unplayable.
@@ -107,25 +92,26 @@ func (u *UpdateService) Check() UpdateStatus {
 		status.Required = true
 		status.Playable = false
 	}
+
+	// Downloading needs no account; multiplayer does. Said only when there is
+	// nothing more useful to say, so it never displaces a real problem.
+	if status.Message == "" && u.core.Session.Account() == nil {
+		status.Message = "Playing offline. Sign in for multiplayer."
+	}
 	return status
 }
 
 // releaseTagged finds one published release by tag.
 //
-// List-then-find rather than a route of its own: the picker fetches the list
-// anyway, and the server caches it. A tag that has aged out of the window is
-// reported as such rather than silently treated as missing.
-func (u *UpdateService) releaseTagged(ctx context.Context, token, tag string) (wcauth.Release, error) {
-	releases, err := u.core.Client.Releases(ctx, token)
-	if err != nil {
-		return wcauth.Release{}, err
+// A lookup in the catalogue already fetched rather than a second request: the
+// index carries every release, so a pinned profile costs the same one fetch as
+// Latest. A tag that is no longer published is reported as such rather than
+// silently becoming "whatever is newest".
+func releaseTagged(index catalog.Index, tag string) (catalog.Release, error) {
+	if release, ok := index.Find(tag); ok {
+		return release, nil
 	}
-	for _, release := range releases {
-		if release.Tag == tag {
-			return release, nil
-		}
-	}
-	return wcauth.Release{}, fmt.Errorf("%s is no longer published; pick another version for this profile", tag)
+	return catalog.Release{}, fmt.Errorf("%s is no longer published; pick another version for this profile", tag)
 }
 
 // Install downloads and unpacks the latest release.
@@ -153,25 +139,29 @@ func (u *UpdateService) Install() string {
 		cancel()
 	}()
 
-	token, err := u.core.Session.AccessToken(ctx)
+	index, err := u.core.Catalog.Index(ctx)
 	if err != nil {
-		if errors.Is(err, ErrSignedOut) {
-			// userMessage would surface the bare "not signed in", which says
-			// nothing about what to do or why this one action needs it.
-			return signInToDownload
-		}
 		return userMessage(err)
 	}
 
 	// What the *selected profile* needs, which is only "latest" when the Latest
 	// profile is selected.
 	profile := u.core.Profiles.Selected()
-	var release wcauth.Release
+	var release catalog.Release
 	if profile.IsLatest() {
-		release, err = u.core.Client.LatestRelease(ctx, token)
+		found, ok := index.Latest()
+		if !ok {
+			return "No Wyvencraft builds are published yet."
+		}
+		release = found
 	} else {
-		release, err = u.releaseTagged(ctx, token, profile.Tag)
+		release, err = releaseTagged(index, profile.Tag)
+		if err != nil {
+			return userMessage(err)
+		}
 	}
+
+	asset, err := install.SelectAsset(release)
 	if err != nil {
 		return userMessage(err)
 	}
@@ -186,7 +176,7 @@ func (u *UpdateService) Install() string {
 		logIfErr("could not install the graphics driver", err)
 	}
 
-	err = u.core.Install.Install(ctx, token, release, report)
+	err = u.core.Install.Install(ctx, release, u.core.Catalog.AssetURL(asset), report)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			u.core.emit("update:progress", install.Progress{Phase: "cancelled", Percent: -1})
@@ -223,13 +213,14 @@ func (u *UpdateService) Cancel() {
 }
 
 // ServerInfo reports what the account server supports.
+//
+// Only about signing in. Whether builds can be downloaded is no longer this
+// server's business, so it is deliberately not reported here — the update check
+// answers that, against the catalogue.
 type ServerInfo struct {
 	Reachable bool   `json:"reachable"`
 	Version   string `json:"version"`
-	// UpdatesEnabled is false when the server brokers no downloads, so the UI
-	// can say so rather than offering a button that answers 501.
-	UpdatesEnabled bool   `json:"updatesEnabled"`
-	Message        string `json:"message"`
+	Message   string `json:"message"`
 }
 
 // Server probes the account server. Unauthenticated, so it works before login.
@@ -238,13 +229,5 @@ func (u *UpdateService) Server() ServerInfo {
 	if err != nil {
 		return ServerInfo{Message: userMessage(err)}
 	}
-	info := ServerInfo{
-		Reachable:      true,
-		Version:        health.Version,
-		UpdatesEnabled: health.UpdatesEnabled,
-	}
-	if !health.UpdatesEnabled {
-		info.Message = "This server does not offer game downloads."
-	}
-	return info
+	return ServerInfo{Reachable: true, Version: health.Version}
 }

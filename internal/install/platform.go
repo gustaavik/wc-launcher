@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/gustaavik/wc-launcher/internal/wcauth"
+	"github.com/gustaavik/wc-launcher/internal/catalog"
 )
 
 // target is the Rust target triple this launcher's platform needs, plus the
@@ -44,13 +44,14 @@ func (e *ErrNoBuild) Error() string {
 // SelectAsset picks the archive to install from a release's assets.
 //
 // Matching is on the target triple rather than on exact file names, so a change
-// to the release workflow's naming does not silently stop finding builds. The
-// `.sha256` siblings are excluded by requiring the archive extension last.
-func SelectAsset(release wcauth.Release) (wcauth.Asset, error) {
+// to the release workflow's naming does not silently stop finding builds.
+// Requiring the archive extension last also excludes a `.sha256` sibling, which
+// the catalogue does not list but a hand-written one might.
+func SelectAsset(release catalog.Release) (catalog.Asset, error) {
 	platform := runtime.GOOS + "/" + runtime.GOARCH
 	want, ok := targets[platform]
 	if !ok {
-		return wcauth.Asset{}, &ErrNoBuild{Tag: release.Tag, Platform: platform}
+		return catalog.Asset{}, &ErrNoBuild{Tag: release.Tag, Platform: platform}
 	}
 
 	for _, asset := range release.Assets {
@@ -58,18 +59,7 @@ func SelectAsset(release wcauth.Release) (wcauth.Asset, error) {
 			return asset, nil
 		}
 	}
-	return wcauth.Asset{}, &ErrNoBuild{Tag: release.Tag, Platform: platform}
-}
-
-// ChecksumAsset finds the `.sha256` sibling of an archive, for releases whose
-// assets predate GitHub publishing a digest.
-func ChecksumAsset(release wcauth.Release, archive wcauth.Asset) (wcauth.Asset, bool) {
-	for _, asset := range release.Assets {
-		if asset.Name == archive.Name+".sha256" {
-			return asset, true
-		}
-	}
-	return wcauth.Asset{}, false
+	return catalog.Asset{}, &ErrNoBuild{Tag: release.Tag, Platform: platform}
 }
 
 // GameBinary is the executable's name inside an unpacked build.

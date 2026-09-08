@@ -9,11 +9,16 @@ updates.
 
 ```
                   ┌──────────────────────────────────────────┐
-   wc-launcher ──▶│ wcauthserver                             │
-                  │  POST /api/v1/auth/login    → session    │
-                  │  GET  /api/v1/keys          → authkeys   │
-                  │  GET  /api/v1/releases/…    → build info │──▶ GitHub
-                  └──────────────────────────────────────────┘   (private repo)
+   wc-launcher ──▶│ wcauthserver          (identity only)    │
+        │         │  POST /api/v1/auth/login    → session    │
+        │         │  GET  /api/v1/keys          → authkeys   │
+        │         └──────────────────────────────────────────┘
+        │
+        │         ┌──────────────────────────────────────────┐
+        ├────────▶│ s3.wyvencraft.com     (no account)       │
+        │         │  releases/game/index.json   → catalogue  │
+        │         │  releases/game/<tag>/…      → the build  │
+        │         └──────────────────────────────────────────┘
         │
         ├─ writes  <data>/profile.toml     the session the game restores
         ├─ writes  <data>/authkeys.toml    so hosting works
@@ -29,11 +34,16 @@ build already on disk plays straight away. Playing signed out means singleplayer
 only — the game enforces that itself, greying out its Multiplayer button and
 refusing the connect path on the same `can_play_multiplayer` check.
 
-An account buys exactly two things: playing with other people, and downloading.
-The game repository is private and wcauthserver brokers every release download
-against the player's own token, so installing or updating a build is the one
-action that asks for a sign-in — and it says so on the button rather than
-failing after the click.
+An account buys exactly one thing: playing with other people. Builds are
+published to a public catalogue on `s3.wyvencraft.com`, so installing and
+updating need no account and no account server — a player who has never signed
+in can download the game and play it, and the update check keeps working while
+wcauthserver is down.
+
+That is also why the update check works while the game is running. The one rule
+that matters then is that the launcher must not touch the refresh token, and
+reading a public catalogue does not. Installing still refuses, because it
+replaces a version directory the running game has open.
 
 The launcher signs in; it never signs up. Accounts are created at
 **[wyvencraft.com](https://wyvencraft.com)**.
@@ -103,8 +113,18 @@ echo '{"authUrl":"http://localhost:8080"}' \
   > ~/Library/Application\ Support/Wyvencraft/launcher.json
 ```
 
-The server needs `GITHUB_RELEASES_TOKEN` set for downloads to work; without it
-`/healthz` reports `updates_enabled: false` and the launcher says so.
+Only sign-in goes there. Builds come from the catalogue either way, so a local
+server with no release configuration is fine — `updates_enabled: false` on
+`/healthz` is expected and the launcher never reads it.
+
+Point the launcher at a different catalogue with `WCL_CATALOG_URL`, which is an
+environment variable rather than a setting on purpose: changing the account
+server changes who you are and invalidates the session, and neither is true of
+where the builds are read from.
+
+```sh
+WCL_CATALOG_URL=http://localhost:9000 ./bin/wc-launcher
+```
 
 ### Against a locally built game
 
@@ -121,8 +141,8 @@ WCL_DEV_GAME_DIR=/tmp/wc-devgame ./bin/wc-launcher
 
 ### Integration tests
 
-Skipped by default so `go test ./...` stays hermetic. They talk to a real
-account server and download a real release:
+Skipped by default so `go test ./...` stays hermetic. They sign in against a
+real account server, read the real catalogue, and download a real release:
 
 ```sh
 WC_IT_AUTH_URL=http://localhost:8080 \
@@ -137,22 +157,23 @@ WCL_DEV_GAME_DIR=/tmp/wc-devgame \
 | --------------------- | --------------------------------------------------------------------------- |
 | `internal/paths`      | The directory layout above. Must agree with the game's `src/paths.rs`       |
 | `internal/profiles`   | `profiles.json`: the profile list and the selection. Not `internal/profile` |
-| `internal/wcauth`     | The account-server client: login, refresh, logout, keys, releases           |
+| `internal/wcauth`     | The account-server client: login, refresh, logout, keys. No downloads       |
 | `internal/profile`    | `profile.toml` and `authkeys.toml` — the handoff to the game                |
+| `internal/catalog`    | The published catalogue on `s3.wyvencraft.com`: what exists, and where      |
 | `internal/install`    | Asset selection, resumable download, checksum, unpack, prune                |
 | `internal/selfupdate` | The launcher's own update: GitHub releases, staging, the swap               |
 | `internal/version`    | Which build this is, stamped in by the release workflow                     |
 | `internal/gamesvc`    | Child environment, Vulkan discovery, spawn, stderr streaming                |
 | `internal/markdown`   | Release notes → HTML, with raw HTML dropped                                 |
-| `internal/services`   | The three objects the frontend calls, and the session rules                 |
+| `internal/services`   | The four objects the frontend calls, and the session rules                  |
 
 ## Updating the launcher itself
 
-The game is updated through wcauthserver, which brokers downloads from the
-private game repository. The launcher is not: this repository is public, so the
-launcher reads its own releases straight from the GitHub API, with no token and
-no account. That matters — a launcher too old to sign in is exactly the one that
-has to be able to replace itself.
+The game comes from the catalogue on `s3.wyvencraft.com`. The launcher does
+not: this repository is public, so it reads its own releases straight from the
+GitHub API. Two independent paths on purpose — a launcher too old to sign in is
+exactly the one that has to be able to replace itself, and it must not depend on
+the object store being configured correctly to do so.
 
 It checks once at startup and offers a strip on the home screen. **Download**
 fetches the release asset, verifies its SHA-256, unpacks it into
@@ -240,3 +261,14 @@ Only if all of that fails does the launcher refuse to start the game, which is
 still more useful than a crash inside the loader.
 
 [wcauthserver]: https://github.com/gustaavik/wcauthserver
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+The launcher is the thinnest of the four pieces and there is nothing here worth
+protecting: it signs you in, downloads a release, and starts the game. The
+[game and engine](https://github.com/gustaavik/wyvencraft) are MIT OR
+Apache-2.0; the game's *assets* and the **Wyvencraft** name are not — see that
+repository's `assets/LICENSE` and `TRADEMARK.md`. The [auth server][wcauthserver]
+is private, and its Docker image ships under its own terms.

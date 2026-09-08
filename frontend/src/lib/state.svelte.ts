@@ -72,7 +72,7 @@ class LauncherState {
     }
 
     /** What the big button should say, given everything else. */
-    get action(): { label: string; kind: "play" | "install" | "update" | "signin" | "none"; enabled: boolean } {
+    get action(): { label: string; kind: "play" | "install" | "update" | "none"; enabled: boolean } {
         if (this.game.running) return { label: "Running", kind: "none", enabled: false };
         if (this.installing) return { label: "Installing…", kind: "none", enabled: false };
 
@@ -88,11 +88,9 @@ class LauncherState {
             return { label: status.installedTag ? "Update" : "Install", kind: "install", enabled: true };
         }
         if (status.playable) return { label: "Play", kind: "play", enabled: true };
-        // Downloading a build is the one thing that genuinely needs an account:
-        // the game repository is private and the account server brokers the
-        // download. Say so on the button rather than offering a click that can
-        // only fail.
-        if (!this.signedIn) return { label: "Sign in to install", kind: "signin", enabled: true };
+        // No sign-in branch: builds are published to a public catalogue, so
+        // installing and playing work signed out. An account buys multiplayer,
+        // which the game enforces itself by having no join ticket to present.
         return { label: "Install", kind: "install", enabled: true };
     }
 
@@ -177,7 +175,7 @@ class LauncherState {
         // no account, so signing in is an offer rather than a gate.
         this.home();
         // Neither call needs a token: List() is read from disk, and Check()
-        // reports what is installed before it asks for one.
+        // reads the public catalogue.
         await this.loadProfiles();
         void this.check();
         // Not gated on being signed in: updating the launcher needs no account,
@@ -341,8 +339,8 @@ class LauncherState {
         // whoever signs in next.
         this.releases = null;
         this.profileError = "";
-        // Stays on Home: signing out costs multiplayer and downloads, not the
-        // build already on disk.
+        // Stays on Home: signing out costs multiplayer, not downloads and not
+        // the build already on disk.
         await this.check();
     }
 }

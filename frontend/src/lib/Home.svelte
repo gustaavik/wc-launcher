@@ -24,10 +24,7 @@
   });
 
   function press() {
-    // Installing needs an account, so the button offers the sign-in instead of
-    // a download that would be refused.
-    if (action.kind === "signin") launcher.go("login");
-    else if (action.kind === "play") void launcher.play();
+    if (action.kind === "play") void launcher.play();
     // A required update is one action, not two: the Latest profile does not
     // offer the old build to fall back on, so there is nothing to stop for.
     else if (action.kind === "update") void launcher.updateAndPlay();

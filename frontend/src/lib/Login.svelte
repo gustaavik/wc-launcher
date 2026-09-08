@@ -48,7 +48,7 @@
       <img class="mark" src="/logo.png" alt="" draggable="false" />
       <div>
         <h1>Wyvencraft</h1>
-        <p class="sub">Sign in for downloads and multiplayer</p>
+        <p class="sub">Sign in to play with others</p>
       </div>
     </div>
 
