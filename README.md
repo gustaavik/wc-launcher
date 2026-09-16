@@ -46,7 +46,7 @@ reading a public catalogue does not. Installing still refuses, because it
 replaces a version directory the running game has open.
 
 The launcher signs in; it never signs up. Accounts are created at
-**[wyvencraft.com](https://wyvencraft.com)**.
+**[wyvencraft.com](https://game.wyvencraft.com)**.
 
 ## On disk
 
