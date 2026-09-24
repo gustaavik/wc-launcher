@@ -317,12 +317,16 @@ class LauncherState {
     async play() {
         this.banner = "";
         this.log = [];
+        // Start and exit both arrive as game:state events, in order. Reading
+        // Status() back here could overwrite an exit that landed first with
+        // the "running" it replied with, and the game looked stuck running.
         const error = await GameService.Launch();
         if (error) this.banner = error;
-        this.game = await GameService.Status();
     }
 
     async stopGame() {
+        // State arrives on game:state, never from a read-back: a reply can land
+        // after a newer event and undo it. Stop re-emits when nothing runs.
         await GameService.Stop();
     }
 

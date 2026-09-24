@@ -36,8 +36,9 @@ var ErrNoVulkan = fmt.Errorf("no Vulkan driver found — %s", VulkanHint)
 // LogFunc receives the child's stderr, a line at a time.
 type LogFunc func(line string)
 
-// ExitFunc is called once, after the process ends.
-type ExitFunc func(Status)
+// StateFunc is called twice per run, in this order: once with the running
+// status as the process starts, once with the exit status when it ends.
+type StateFunc func(Status)
 
 // Runner owns at most one game process.
 type Runner struct {
@@ -68,8 +69,12 @@ func (r *Runner) Running() bool {
 
 // Start launches the game and returns once it is running.
 //
-// The process is watched on a goroutine; onExit fires when it ends.
-func (r *Runner) Start(opts Options, logPath string, onLog LogFunc, onExit ExitFunc) error {
+// The process is watched on a goroutine. onState reports the start before that
+// goroutine exists, so the exit — however soon it comes — is always reported
+// after it. The caller reading Status() and emitting it itself could not
+// promise that: a game killed by the loader before main ended first, and the
+// launcher was left showing a stale "Running".
+func (r *Runner) Start(opts Options, logPath string, onLog LogFunc, onState StateFunc) error {
 	r.mu.Lock()
 	if r.cmd != nil {
 		r.mu.Unlock()
@@ -115,12 +120,16 @@ func (r *Runner) Start(opts Options, logPath string, onLog LogFunc, onExit ExitF
 		return fmt.Errorf("start the game: %w", err)
 	}
 
+	started := Status{Running: true, PID: cmd.Process.Pid}
 	r.mu.Lock()
 	r.cmd = cmd
-	r.last = Status{Running: true, PID: cmd.Process.Pid}
+	r.last = started
 	r.mu.Unlock()
 
-	go r.watch(cmd, stderr, logPath, onLog, onExit)
+	if onState != nil {
+		onState(started)
+	}
+	go r.watch(cmd, stderr, logPath, onLog, onState)
 	return nil
 }
 
@@ -136,7 +145,7 @@ func (r *Runner) Stop() error {
 	return cmd.Process.Kill()
 }
 
-func (r *Runner) watch(cmd *exec.Cmd, stderr io.ReadCloser, logPath string, onLog LogFunc, onExit ExitFunc) {
+func (r *Runner) watch(cmd *exec.Cmd, stderr io.ReadCloser, logPath string, onLog LogFunc, onState StateFunc) {
 	// Truncated per run. A launcher log that grows forever is a support burden,
 	// and only the most recent session is ever useful.
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
@@ -167,10 +176,10 @@ func (r *Runner) watch(cmd *exec.Cmd, stderr io.ReadCloser, logPath string, onLo
 	switch {
 	case waitErr == nil:
 		status.ExitCode = 0
-		status.Message = "Wyvencraft closed."
+		status.Message = exitMessage(0)
 	case errors.As(waitErr, &exitErr):
 		status.ExitCode = exitErr.ExitCode()
-		status.Message = fmt.Sprintf("Wyvencraft exited with code %d. See the log for details.", status.ExitCode)
+		status.Message = exitMessage(status.ExitCode)
 	default:
 		status.ExitCode = -1
 		status.Message = "Wyvencraft stopped unexpectedly: " + waitErr.Error()
@@ -181,7 +190,7 @@ func (r *Runner) watch(cmd *exec.Cmd, stderr io.ReadCloser, logPath string, onLo
 	r.last = status
 	r.mu.Unlock()
 
-	if onExit != nil {
-		onExit(status)
+	if onState != nil {
+		onState(status)
 	}
 }
