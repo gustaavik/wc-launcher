@@ -16,6 +16,8 @@ func TestExitMessageExplainsTheWindowsCodesAPlayerCanHit(t *testing.T) {
 		{"entry point not found", 0xC0000139, []string{"missing", "reinstall"}},
 		{"bad image", 0xC000007B, []string{"reinstall"}},
 		{"access violation", 0xC0000005, []string{"crashed", "log"}},
+		// The game's EXIT_NO_VULKAN: no GPU it can run on.
+		{"no vulkan", 3, []string{"vulkan", "graphics driver", "virtual machines"}},
 		{"unknown", 7, []string{"code 7", "log"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

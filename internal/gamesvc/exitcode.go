@@ -2,6 +2,12 @@ package gamesvc
 
 import "fmt"
 
+// exitNoVulkan is the game's own code for "no GPU I can run on": no Vulkan
+// loader, no driver, or no device with what the renderer needs. A contract
+// with the game — EXIT_NO_VULKAN in its src/main.rs — so change both or
+// neither.
+const exitNoVulkan = 3
+
 // Windows NTSTATUS codes a process can end with before it logs anything. Go's
 // ExitCode reports them as the unsigned value, 3221225781 for 0xC0000135.
 const (
@@ -20,6 +26,10 @@ const (
 func exitMessage(code int) string {
 	if code == 0 {
 		return "Wyvencraft closed."
+	}
+	if code == exitNoVulkan {
+		return "Wyvencraft needs a graphics card with Vulkan support, and none was found. " +
+			"Update your graphics driver and try again. Virtual machines usually cannot run Wyvencraft."
 	}
 
 	const reinstall = "Wyvencraft could not start because a file it needs is missing or damaged. Try reinstalling the game."
