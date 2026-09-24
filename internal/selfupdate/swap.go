@@ -2,6 +2,8 @@ package selfupdate
 
 import (
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,7 +30,7 @@ const parentWait = 30 * time.Second
 // after this returns.
 func Apply(staged string, target Target) error {
 	if !target.Writable {
-		return fmt.Errorf("%s cannot be replaced from here; move the launcher somewhere you can write to, such as /Applications", target.Path)
+		return fmt.Errorf("%s cannot be replaced from here; move the launcher somewhere you can write to, such as %s", target.Path, writableHint())
 	}
 
 	helper := staged
@@ -50,6 +52,14 @@ func Apply(staged string, target Target) error {
 	// Nothing waits on the helper: this process is about to exit, and the
 	// helper deliberately outlives it to be reparented.
 	return cmd.Process.Release()
+}
+
+// writableHint names a place the launcher could be installed to update itself.
+func writableHint() string {
+	if runtime.GOOS == "windows" {
+		return "a per-user install under %LOCALAPPDATA%\\Programs"
+	}
+	return "/Applications"
 }
 
 // Swap is the helper side of Apply, run by the staged build.
@@ -78,6 +88,34 @@ func Swap(target, parentPID string) error {
 		return err
 	}
 	return relaunch(target)
+}
+
+// ClearPrevious removes the launcher an earlier update moved aside, if replace
+// could not delete it at the time.
+//
+// That happens on Windows when the helper gave up waiting and swapped a
+// launcher that was still running: Windows lets a running executable be
+// renamed but not deleted, so its .old outlives the swap. By the next normal
+// start it has exited. Best effort, and a no-op when there is nothing there.
+func ClearPrevious() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	target := exe
+	if app, ok := bundleOf(exe); ok {
+		target = app
+	}
+	previous := target + ".old"
+	if _, err := os.Stat(previous); err != nil {
+		return
+	}
+	if err := os.RemoveAll(previous); err != nil {
+		slog.Warn("could not remove the previous launcher", "path", previous, "error", err)
+	}
 }
 
 // replace puts src in place of dst without a window where dst does not exist.
@@ -123,8 +161,12 @@ func replace(src, dst string) error {
 //
 // ditto on macOS, for the same reason unpack uses it: a code signature only
 // survives an exact reproduction, extended attributes and the stapled
-// notarization ticket included.
+// notarization ticket included. A bare executable — what Windows installs — is
+// a plain file copy.
 func copyTree(src, dst string) error {
+	if info, err := os.Stat(src); err == nil && info.Mode().IsRegular() && runtime.GOOS != "darwin" {
+		return copyFile(src, dst)
+	}
 	if runtime.GOOS == "darwin" {
 		if out, err := exec.Command("/usr/bin/ditto", src, dst).CombinedOutput(); err != nil {
 			return fmt.Errorf("copy the new launcher: %v: %s", err, strings.TrimSpace(string(out)))
@@ -132,6 +174,30 @@ func copyTree(src, dst string) error {
 		return nil
 	}
 	return fmt.Errorf("applying a launcher update is not supported on %s", runtime.GOOS)
+}
+
+// copyFile copies one executable, flushed to disk before the rename that makes
+// it the launcher.
+func copyFile(src, dst string) error {
+	source, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open the new launcher: %w", err)
+	}
+	defer source.Close()
+
+	target, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", dst, err)
+	}
+	if _, err := io.Copy(target, source); err != nil {
+		target.Close()
+		return fmt.Errorf("copy the new launcher: %w", err)
+	}
+	if err := target.Sync(); err != nil {
+		target.Close()
+		return fmt.Errorf("flush the new launcher: %w", err)
+	}
+	return target.Close()
 }
 
 // relaunch starts the freshly installed launcher.

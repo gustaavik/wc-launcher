@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 )
 
@@ -83,7 +84,8 @@ func (r *Runner) Start(opts Options, logPath string, onLog LogFunc, onExit ExitF
 	}
 	// A build unpacked by an older launcher, or restored from a backup that
 	// dropped the mode bits, would fail with a bare "permission denied".
-	if info.Mode()&0o111 == 0 {
+	// Windows has no executable bit to lose, and never reports one.
+	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 		if err := os.Chmod(binary, 0o755); err != nil {
 			return fmt.Errorf("%s is not executable: %w", binary, err)
 		}
@@ -100,6 +102,7 @@ func (r *Runner) Start(opts Options, logPath string, onLog LogFunc, onExit ExitF
 	// textures, no models and no content tables.
 	cmd.Dir = opts.VersionDir
 	cmd.Env = buildEnv(Environ(), opts, vulkan)
+	cmd.SysProcAttr = sysProcAttr()
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {

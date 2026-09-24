@@ -2,6 +2,7 @@ package selfupdate
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -135,5 +136,55 @@ func TestWaitForExitGivesUpRatherThanHanging(t *testing.T) {
 func TestProcessAliveKnowsThisProcess(t *testing.T) {
 	if !processAlive(os.Getpid()) {
 		t.Error("this process reported as gone")
+	}
+}
+
+// On Windows os.FindProcess leaked a handle that kept every pid "alive", so the
+// helper always waited out the full parentWait. A reaped child must read gone.
+func TestProcessAliveKnowsAnExitedProcessIsGone(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := exec.Command(exe, "-test.run=^$")
+	if err := child.Run(); err != nil {
+		t.Fatalf("run child: %v", err)
+	}
+	if processAlive(child.Process.Pid) {
+		t.Error("an exited child reported as alive")
+	}
+}
+
+// Windows installs a bare executable, not a bundle: replace must swap a file.
+func TestReplaceSwapsABareExecutable(t *testing.T) {
+	dir := t.TempDir()
+	installed := filepath.Join(dir, "Wyvencraft.exe")
+	staged := filepath.Join(dir, "staged", "Wyvencraft.exe")
+	if err := os.MkdirAll(filepath.Dir(staged), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installed, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(staged, []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := replace(staged, installed); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+
+	if raw, _ := os.ReadFile(installed); string(raw) != "new" {
+		t.Errorf("installed executable contains %q, want %q", raw, "new")
+	}
+	for _, leftover := range []string{installed + ".old", installed + ".new"} {
+		if _, err := os.Stat(leftover); err == nil {
+			t.Errorf("%s was left behind", leftover)
+		}
+	}
+	if runtime.GOOS != "windows" {
+		if info, err := os.Stat(installed); err == nil && info.Mode().Perm()&0o111 == 0 {
+			t.Errorf("mode = %o, want it executable", info.Mode().Perm())
+		}
 	}
 }

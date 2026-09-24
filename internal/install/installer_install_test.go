@@ -48,15 +48,25 @@ func servedRelease(t *testing.T, tag string, body []byte, sha string) (catalog.R
 }
 
 // gameArchive is the shape the release workflow produces: one top-level
-// directory holding the binary and its assets.
+// directory holding the binary and its assets, in the format this platform's
+// asset is published in — a .zip on Windows, a .tar.gz everywhere else.
 func gameArchive(t *testing.T, tag string) []byte {
 	t.Helper()
 	dir := "wyvencraft-" + tag + "-" + runtime.GOOS + "/"
-	path := buildTarGz(t, []entry{
-		{name: dir, kind: tar.TypeDir},
-		{name: dir + GameBinary(), body: "#!/bin/sh\n", mode: 0o755},
-		{name: dir + "README.md", body: "hello"},
-	})
+	var path string
+	if want, ok := targets[runtime.GOOS+"/"+runtime.GOARCH]; ok && want.ext == ".zip" {
+		path = buildZip(t, []entry{
+			{name: dir},
+			{name: dir + GameBinary(), body: "MZ"},
+			{name: dir + "README.md", body: "hello"},
+		})
+	} else {
+		path = buildTarGz(t, []entry{
+			{name: dir, kind: tar.TypeDir},
+			{name: dir + GameBinary(), body: "#!/bin/sh\n", mode: 0o755},
+			{name: dir + "README.md", body: "hello"},
+		})
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

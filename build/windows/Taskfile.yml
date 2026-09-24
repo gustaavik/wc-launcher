@@ -96,13 +96,17 @@ tasks:
 
   package:
     summary: Packages the application
+    # Per-user by default: installs to %LOCALAPPDATA%\Programs with no UAC
+    # prompt, and — the reason it matters — leaves the launcher somewhere it can
+    # write to, which self-update needs. A machine install under Program Files
+    # reports "cannot update itself where it is installed" instead.
     cmds:
       - task: '{{if eq (.FORMAT | default "nsis") "msix"}}create:msix:package{{else}}create:nsis:installer{{end}}'
         vars:
-          INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
+          INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "user"}}'
     vars:
       FORMAT: '{{.FORMAT | default "nsis"}}'
-      INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
+      INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "user"}}'
 
   generate:syso:
     summary: Generates Windows `.syso` file
@@ -132,7 +136,7 @@ tasks:
     vars:
       ARCH: '{{.ARCH | default ARCH}}'
       ARG_FLAG: '{{if eq .ARCH "amd64"}}AMD64{{else}}ARM64{{end}}'
-      INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
+      INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "user"}}'
 
   create:msix:package:
     summary: Creates an MSIX package
@@ -188,8 +192,9 @@ tasks:
     deps:
       - task: create:nsis:installer
         vars:
-          INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
+          INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "user"}}'
     vars:
-      INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "machine"}}'
+      INSTALL_SCOPE: '{{.INSTALL_SCOPE | default "user"}}'
     cmds:
-      - wails3 tool sign --input "build/windows/nsis/{{.APP_NAME}}-installer.exe" {{if .SIGN_CERTIFICATE}}--certificate "{{.SIGN_CERTIFICATE}}"{{end}} {{if .SIGN_THUMBPRINT}}--thumbprint "{{.SIGN_THUMBPRINT}}"{{end}} {{if .TIMESTAMP_SERVER}}--timestamp "{{.TIMESTAMP_SERVER}}"{{end}}
+      # project.nsi writes the installer to bin/, named by project and arch.
+      - wails3 tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}-{{.ARCH | default ARCH}}-installer.exe" {{if .SIGN_CERTIFICATE}}--certificate "{{.SIGN_CERTIFICATE}}"{{end}} {{if .SIGN_THUMBPRINT}}--thumbprint "{{.SIGN_THUMBPRINT}}"{{end}} {{if .TIMESTAMP_SERVER}}--timestamp "{{.TIMESTAMP_SERVER}}"{{end}}

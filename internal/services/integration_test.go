@@ -3,6 +3,7 @@ package services
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -191,7 +192,7 @@ func TestEndToEndSignInAndInstall(t *testing.T) {
 		if err != nil {
 			t.Fatalf("no game binary at %s: %v", binary, err)
 		}
-		if info.Mode()&0o111 == 0 {
+		if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 			t.Errorf("%s is not executable (mode %o)", binary, info.Mode().Perm())
 		}
 		if _, err := os.Stat(filepath.Join(dir, "assets", "blocks.toml")); err != nil {

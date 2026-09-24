@@ -34,6 +34,22 @@ jobs:
       - run: go vet ./internal/...
       - run: go test -race ./internal/...
 
+  # The same tests on Windows, where the launcher's process, path and archive
+  # code takes different branches. No -race: it needs cgo, and this job is
+  # about the Windows branches, not about races the Linux job already covers.
+  go-windows:
+    name: vet + tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - run: go vet ./internal/...
+      - run: go test ./internal/...
+
   # The build the release workflow performs, minus signing. This is what catches
   # a broken main.go, a stale binding, or a frontend that no longer compiles.
   app:

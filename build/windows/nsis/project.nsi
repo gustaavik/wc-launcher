@@ -61,6 +61,10 @@ ManifestDPIAware true
 # !insertmacro MUI_PAGE_LICENSE "resources\eula.txt" # Adds a EULA page to the installer
 !insertmacro MUI_PAGE_DIRECTORY # In which folder install page.
 !insertmacro MUI_PAGE_INSTFILES # Installing page.
+# Offer to start the launcher straight away. Safe because the installer runs per
+# user (see build/windows/Taskfile.yml), so the launcher does not inherit an
+# elevated token it would then hand on to the game.
+!define MUI_FINISHPAGE_RUN "$INSTDIR\${PRODUCT_EXECUTABLE}"
 !insertmacro MUI_PAGE_FINISH # Finished installation page.
 
 !insertmacro MUI_UNPAGE_INSTFILES # Uninstalling page

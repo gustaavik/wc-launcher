@@ -2,7 +2,10 @@
   // The launcher's own update, which is not the game's: it comes from GitHub,
   // it works signed out, and applying it restarts this window.
   import ProgressPanel from "./ProgressPanel.svelte";
+  import { currentOS } from "./platform";
   import { launcher } from "./state.svelte";
+
+  const os = currentOS();
 
   const status = $derived(launcher.selfUpdate);
   const tag = $derived(status?.latest?.tag ?? "");
@@ -27,8 +30,13 @@
       <!-- Downloading would only fail at the last step, so the button is not
            offered at all. -->
       <p class="sub warn">
-        The launcher cannot replace itself where it is installed. Move it to your
-        Applications folder and check again.
+        {#if os === 'windows'}
+          The launcher cannot replace itself where it is installed. Reinstall it
+          for your user account only, then check again.
+        {:else}
+          The launcher cannot replace itself where it is installed. Move it to your
+          Applications folder and check again.
+        {/if}
       </p>
     {:else if launcher.selfBusy && launcher.selfProgress}
       <ProgressPanel progress={launcher.selfProgress} oncancel={() => launcher.cancelSelfInstall()} />

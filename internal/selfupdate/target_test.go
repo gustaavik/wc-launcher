@@ -3,6 +3,7 @@ package selfupdate
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -41,8 +42,16 @@ func TestWritableProbesRatherThanTrustingTheMode(t *testing.T) {
 		t.Errorf("a fresh temp directory reported unwritable")
 	}
 
+	if writable(filepath.Join(dir, "missing")) {
+		t.Errorf("a directory that does not exist reported writable")
+	}
+
 	// A mode alone is not the answer, but it is the one case a test can set up
 	// portably, and it must be respected.
+	if runtime.GOOS == "windows" {
+		// A directory's mode is ignored on Windows: only its ACL denies writes.
+		t.Skip("directory modes do not restrict writes on Windows")
+	}
 	locked := filepath.Join(dir, "locked")
 	if err := os.Mkdir(locked, 0o500); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -52,10 +61,6 @@ func TestWritableProbesRatherThanTrustingTheMode(t *testing.T) {
 	}
 	if writable(locked) {
 		t.Errorf("a read-only directory reported writable")
-	}
-
-	if writable(filepath.Join(dir, "missing")) {
-		t.Errorf("a directory that does not exist reported writable")
 	}
 }
 

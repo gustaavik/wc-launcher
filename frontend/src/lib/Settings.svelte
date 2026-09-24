@@ -140,7 +140,7 @@
     display: grid;
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    padding: var(--s-2) var(--s-3) var(--s-2) 5.5rem;
+    padding: var(--s-2) var(--s-3) var(--s-2) var(--titlebar-inset);
     border-bottom: 1px solid var(--border);
     flex: none;
     font-size: 0.9rem;
