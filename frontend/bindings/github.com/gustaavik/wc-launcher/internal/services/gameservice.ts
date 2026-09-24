@@ -40,6 +40,10 @@ export function Status(): $CancellablePromise<$models.GameStatus> {
 
 /**
  * Stop ends the game.
+ * 
+ * With nothing running there is no exit to report, so the current status is
+ * emitted instead: a UI still showing "Running" is then corrected, rather than
+ * left with a Stop button that does nothing.
  */
 export function Stop(): $CancellablePromise<string> {
     return $Call.ByID(731065659);

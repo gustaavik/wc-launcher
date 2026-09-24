@@ -83,7 +83,13 @@ func (g *GameService) Launch() string {
 	err = g.core.Runner.Start(opts, g.core.Layout.GameLog(),
 		func(line string) { g.core.emit("game:log", line) },
 		func(status gamesvc.Status) {
+			// Start and exit both arrive here, in that order — the runner
+			// guarantees it, which emitting Runner.Status() after Start
+			// returned did not.
 			g.core.emit("game:state", status)
+			if status.Running {
+				return
+			}
 			// 4. The game rotates the refresh token while it runs, so what the
 			//    launcher holds is now stale and the file is authoritative.
 			g.core.Session.Reload(context.Background())
@@ -92,8 +98,6 @@ func (g *GameService) Launch() string {
 	if err != nil {
 		return err.Error()
 	}
-
-	g.core.emit("game:state", g.core.Runner.Status())
 	return ""
 }
 
@@ -137,7 +141,15 @@ func (g *GameService) installDriver(ctx context.Context) error {
 }
 
 // Stop ends the game.
+//
+// With nothing running there is no exit to report, so the current status is
+// emitted instead: a UI still showing "Running" is then corrected, rather than
+// left with a Stop button that does nothing.
 func (g *GameService) Stop() string {
+	if !g.core.Runner.Running() {
+		g.core.emit("game:state", g.core.Runner.Status())
+		return ""
+	}
 	if err := g.core.Runner.Stop(); err != nil {
 		return err.Error()
 	}

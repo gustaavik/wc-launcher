@@ -3,6 +3,7 @@ package profile
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -128,6 +129,12 @@ func TestAProfileRoundTripsThroughWriteAndRead(t *testing.T) {
 
 // The refresh token is the sensitive part of the file.
 func TestTheProfileIsNotWorldReadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Go maps 0o600 onto a read/write attribute and reports 0o666 back.
+		// Access there is governed by the ACL %APPDATA% inherits, which is
+		// already private to the user.
+		t.Skip("POSIX modes are not how Windows restricts a file")
+	}
 	path := tempFile(t, "profile.toml")
 	if err := Write(path, Profile{ClientID: "1"}); err != nil {
 		t.Fatal(err)

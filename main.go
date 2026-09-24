@@ -64,6 +64,7 @@ func main() {
 	if err := os.RemoveAll(layout.LauncherUpdateRoot()); err != nil {
 		slog.Warn("could not clear the staged launcher update", "error", err)
 	}
+	selfupdate.ClearPrevious()
 
 	// The emitter is set once the app exists, so Core is built with none and
 	// given one below. Events fired before then are dropped, which is fine:
@@ -101,6 +102,12 @@ func main() {
 			InvisibleTitleBarHeight: 44,
 			Backdrop:                application.MacBackdropTranslucent,
 			TitleBar:                application.MacTitleBarHiddenInset,
+		},
+		// Windows keeps its standard title bar — there are no traffic lights to
+		// draw over, so the content needs no inset (see --titlebar-inset). Dark,
+		// so the bar matches the page rather than flashing white above it.
+		Windows: application.WindowsWindow{
+			Theme: application.Dark,
 		},
 		BackgroundColour: application.NewRGB(11, 14, 20),
 		URL:              "/",

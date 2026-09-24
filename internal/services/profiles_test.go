@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gustaavik/wc-launcher/internal/catalog"
 	"github.com/gustaavik/wc-launcher/internal/install"
@@ -17,7 +18,16 @@ func hermeticCore(t *testing.T) *Core {
 	return testCore(t, "http://127.0.0.1:1", "http://127.0.0.1:1")
 }
 
+// installClock hands each faked install a strictly later modification time.
+var installClock = time.Now().Add(-time.Hour)
+
 // installBuild fakes an unpacked build under versions/<tag>.
+//
+// install.List ranks builds by their directory's modification time, and two
+// builds made microseconds apart can share one: Windows stamps file times from
+// a clock that ticks in milliseconds, so "installed second" did not reliably
+// mean "newer" there. Each call is therefore stamped a second after the last,
+// which is the order a real install sequence produces.
 func installBuild(t *testing.T, core *Core, tag string) {
 	t.Helper()
 	dir := core.Layout.VersionDir(tag)
@@ -27,6 +37,11 @@ func installBuild(t *testing.T, core *Core, tag string) {
 	binary := filepath.Join(dir, install.GameBinary())
 	if err := os.WriteFile(binary, []byte("#!/bin/true\n"), 0o755); err != nil {
 		t.Fatalf("write %s: %v", binary, err)
+	}
+	// After the write, which would otherwise move the directory's time again.
+	installClock = installClock.Add(time.Second)
+	if err := os.Chtimes(dir, installClock, installClock); err != nil {
+		t.Fatalf("stamp %s: %v", dir, err)
 	}
 }
 

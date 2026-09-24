@@ -1,13 +1,16 @@
 package selfupdate
 
 import (
+	"archive/zip"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -27,7 +30,7 @@ const TeamID = "S6EF64ZEMD"
 const checksumLimit = 4096
 
 // Stage downloads, verifies and unpacks a launcher build, and returns the path
-// to the unpacked .app.
+// to the unpacked payload: the .app on macOS, the .exe on Windows.
 //
 // Nothing here touches the running launcher: staging is a separate directory,
 // and a failure at any point leaves the current install exactly as it was.
@@ -76,7 +79,7 @@ func Stage(ctx context.Context, layout paths.Layout, client *Client, release Rel
 		return "", err
 	}
 
-	app, err := unpackedBundle(dir)
+	app, err := unpackedPayload(dir, runtime.GOOS)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", asset.Name, err)
 	}
@@ -97,8 +100,15 @@ func Stage(ctx context.Context, layout paths.Layout, client *Client, release Rel
 // ditto rather than archive/zip: the payload is a signed .app, and a signature
 // survives only if the bundle is reproduced exactly, extended attributes and
 // stapled notarization ticket included. ditto ships with macOS.
+//
+// Windows needs none of that: the payload is one executable, taken out by
+// unpackExe.
 func unpack(archive, dest string) error {
-	if runtime.GOOS != "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
+	case "windows":
+		return unpackExe(archive, dest)
+	default:
 		return fmt.Errorf("unpacking a launcher build is not supported on %s", runtime.GOOS)
 	}
 	cmd := exec.Command("/usr/bin/ditto", "-x", "-k", archive, dest)
@@ -106,6 +116,93 @@ func unpack(archive, dest string) error {
 		return fmt.Errorf("unpack the launcher build: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// plainExeName is what a Windows launcher build may call itself. Only the name
+// survives unpacking, so this is also what keeps the file inside dest: no
+// separator, no drive letter, no alternate-data-stream colon.
+var plainExeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]*\.exe$`)
+
+// maxExeSize bounds the unpacked executable. The real one is tens of megabytes.
+const maxExeSize = 512 << 20
+
+// unpackExe writes the one executable a Windows launcher build contains into
+// dest, under its own file name and nothing else of the path it was stored at.
+//
+// Deliberately not install.Extract: that strips a top-level directory the
+// launcher archive does not have, and it writes a whole tree where exactly one
+// file is wanted. Anything other than exactly one .exe is refused, so a
+// tampered archive cannot choose which of several files becomes the launcher.
+func unpackExe(archive, dest string) error {
+	reader, err := zip.OpenReader(archive)
+	if err != nil {
+		return fmt.Errorf("open the launcher build: %w", err)
+	}
+	defer reader.Close()
+
+	var exe *zip.File
+	for _, file := range reader.File {
+		if file.FileInfo().IsDir() || !strings.HasSuffix(strings.ToLower(file.Name), ".exe") {
+			continue
+		}
+		if exe != nil {
+			return fmt.Errorf("the launcher build contains more than one executable")
+		}
+		exe = file
+	}
+	if exe == nil {
+		return fmt.Errorf("the launcher build contains no executable")
+	}
+
+	name := path.Base(strings.ReplaceAll(exe.Name, `\`, "/"))
+	if !plainExeName.MatchString(name) {
+		return fmt.Errorf("the launcher build names its executable %q, which is not a plain file name", exe.Name)
+	}
+
+	source, err := exe.Open()
+	if err != nil {
+		return fmt.Errorf("read %s: %w", name, err)
+	}
+	defer source.Close()
+
+	target, err := os.OpenFile(filepath.Join(dest, name), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o755)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", name, err)
+	}
+	written, err := io.Copy(target, io.LimitReader(source, maxExeSize+1))
+	if closeErr := target.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return fmt.Errorf("write %s: %w", name, err)
+	}
+	if written > maxExeSize {
+		return fmt.Errorf("%s is larger than any launcher build", name)
+	}
+	return nil
+}
+
+// unpackedPayload finds what the archive delivered: the single .app on macOS,
+// the single .exe on Windows.
+func unpackedPayload(dir, goos string) (string, error) {
+	if goos == "windows" {
+		return unpackedFile(dir, ".exe")
+	}
+	return unpackedBundle(dir)
+}
+
+// unpackedFile finds the one regular file in dir with the given extension.
+func unpackedFile(dir, ext string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", dir, err)
+	}
+	for _, entry := range entries {
+		if entry.Type().IsRegular() && strings.EqualFold(filepath.Ext(entry.Name()), ext) {
+			return filepath.Join(dir, entry.Name()), nil
+		}
+	}
+	return "", fmt.Errorf("contains no %s", ext)
 }
 
 // unpackedBundle finds the single .app the archive contained.
@@ -123,6 +220,11 @@ func unpackedBundle(dir string) (string, error) {
 }
 
 // verifySignature refuses a build that is not intact and not ours.
+//
+// macOS only for now. The Windows build ships unsigned, so there is no
+// Authenticode signer to pin yet; the SHA-256 against GitHub's digest is the
+// whole check there. Once the release workflow signs, verify the signer's
+// subject here the way TeamID is checked below.
 func verifySignature(app string) error {
 	if runtime.GOOS != "darwin" {
 		return nil

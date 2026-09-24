@@ -169,9 +169,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    /* Left padding clears the macOS traffic lights, which the frameless
-       window draws over the content. */
-    padding: var(--s-2) var(--s-3) var(--s-2) 5.5rem;
+    /* Clears the macOS traffic lights; see --titlebar-inset. */
+    padding: var(--s-2) var(--s-3) var(--s-2) var(--titlebar-inset);
     border-bottom: 1px solid var(--border);
     flex: none;
   }

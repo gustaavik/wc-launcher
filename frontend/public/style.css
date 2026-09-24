@@ -28,6 +28,11 @@
     --s-3: 1.618rem;
     --s-4: 2.618rem;
 
+    /* Left inset of each screen's header. The macOS window is frameless with an
+       inset title bar, so the traffic lights sit over the content and need
+       clearing; elsewhere the OS draws its own title bar above the page. */
+    --titlebar-inset: var(--s-3);
+
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
         "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji";
     color-scheme: dark;
@@ -289,4 +294,7 @@ select option {
 
 ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.2);
+}
+:root[data-os="mac"] {
+    --titlebar-inset: 5.5rem;
 }

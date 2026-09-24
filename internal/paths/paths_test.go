@@ -62,7 +62,9 @@ func TestVersionDirContainsATagsFiles(t *testing.T) {
 // would happily point outside the app-data directory, and installing a release
 // would become an arbitrary-write.
 func TestAHostileTagCannotEscapeTheVersionsDirectory(t *testing.T) {
-	l := Layout{Versions: "/root/versions"}
+	// Native separators, so the comparison below holds on Windows too, where
+	// filepath.Join would otherwise turn "/root/versions" into `\root\versions`.
+	l := Layout{Versions: filepath.FromSlash("/root/versions")}
 
 	for _, tag := range []string{
 		"../../etc",
@@ -96,8 +98,8 @@ func TestLauncherUpdateStagingIsOutsideVersions(t *testing.T) {
 	// The game installer prunes versions/ down to two builds. A staged launcher
 	// living there would be deleted to make room for a game update.
 	l := Layout{
-		Root:     "/root",
-		Versions: "/root/versions",
+		Root:     filepath.FromSlash("/root"),
+		Versions: filepath.FromSlash("/root/versions"),
 	}
 
 	for _, path := range []string{l.LauncherUpdateRoot(), l.LauncherUpdateDir("v0.2.0")} {

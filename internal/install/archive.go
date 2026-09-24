@@ -3,6 +3,7 @@ package install
 import (
 	"archive/tar"
 	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"fmt"
 	"io"
@@ -24,11 +25,57 @@ const maxEntrySize = 2 << 30
 // The archive's single top-level directory is stripped, so dest ends up holding
 // the binary and assets/ directly rather than one directory containing them.
 // That is what the release workflow produces: `wyvencraft-<tag>-<triple>/`.
+//
+// The format is read from the file's first bytes, not its name: the installer
+// always extracts a `.part` file, whatever the asset was called, so a suffix
+// check sent every Windows .zip down the gzip path.
 func Extract(archivePath, dest string) error {
-	if strings.HasSuffix(archivePath, ".zip") {
-		return extractZip(archivePath, dest)
+	format, err := sniff(archivePath)
+	if err != nil {
+		return err
 	}
-	return extractTarGz(archivePath, dest)
+	switch format {
+	case formatZip:
+		return extractZip(archivePath, dest)
+	case formatGzip:
+		return extractTarGz(archivePath, dest)
+	default:
+		return fmt.Errorf("%s is neither a .zip nor a .tar.gz", filepath.Base(archivePath))
+	}
+}
+
+type archiveFormat int
+
+const (
+	formatUnknown archiveFormat = iota
+	formatZip
+	formatGzip
+)
+
+// sniff identifies an archive by its magic number: "PK\x03\x04" opens a zip
+// (an empty one opens "PK\x05\x06", its end record), 0x1f 0x8b a gzip stream.
+func sniff(archivePath string) (archiveFormat, error) {
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return formatUnknown, fmt.Errorf("open %s: %w", archivePath, err)
+	}
+	defer file.Close()
+
+	magic := make([]byte, 4)
+	n, err := io.ReadFull(file, magic)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return formatUnknown, fmt.Errorf("read %s: %w", archivePath, err)
+	}
+	magic = magic[:n]
+
+	switch {
+	case bytes.HasPrefix(magic, []byte("PK\x03\x04")), bytes.HasPrefix(magic, []byte("PK\x05\x06")):
+		return formatZip, nil
+	case bytes.HasPrefix(magic, []byte{0x1f, 0x8b}):
+		return formatGzip, nil
+	default:
+		return formatUnknown, nil
+	}
 }
 
 func extractTarGz(archivePath, dest string) error {

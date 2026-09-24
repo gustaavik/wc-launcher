@@ -219,3 +219,109 @@ jobs:
             security delete-keychain "$KEYCHAIN"
           fi
           rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/cert.p12"
+
+  windows:
+    name: Windows amd64
+    runs-on: windows-latest
+    # Same reason as the macOS job: deps/* tags carry no launcher.
+    if: ${{ !startsWith(github.event.release.tag_name, 'deps/') }}
+    # Git Bash, so the steps read like the macOS job's rather than PowerShell.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Resolve the release tag
+        run: echo "TAG=${{ github.event.release.tag_name || inputs.tag }}" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the wails3 CLI
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
+
+      # The runner image usually carries NSIS already; install it only if not.
+      - name: Install NSIS
+        run: |
+          if ! command -v makensis > /dev/null; then
+            choco install nsis -y --no-progress
+          fi
+          echo "C:/Program Files (x86)/NSIS" >> "$GITHUB_PATH"
+
+      - name: Install the frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Stamp the version
+        run: |
+          set -euo pipefail
+          printf '%s' "$TAG" > internal/version/VERSION
+
+          # Windows version resources and the installer's VIProductVersion take
+          # dotted digits only, so a -rc.1 suffix is trimmed, as for
+          # CFBundleVersion on macOS. The display strings keep the whole tag.
+          SHORT="${TAG#v}"
+          NUMERIC=$(printf '%s' "$SHORT" | sed 's/[^0-9.].*$//')
+          NUMERIC="${NUMERIC:-0.0.0}"
+
+          jq --arg n "$NUMERIC" --arg s "$SHORT" \
+            '.fixed.file_version = $n | .info["0000"].ProductVersion = $s' \
+            build/windows/info.json > info.json.tmp
+          mv info.json.tmp build/windows/info.json
+          sed -i "s/\(name=\"com.wyvencraft.wclauncher\" version=\"\)[^\"]*/\1${NUMERIC}.0/" \
+            build/windows/wails.exe.manifest
+          sed -i "s/define INFO_PRODUCTVERSION \"[^\"]*\"/define INFO_PRODUCTVERSION \"${NUMERIC}\"/" \
+            build/windows/nsis/wails_tools.nsh
+          grep -q "INFO_PRODUCTVERSION \"${NUMERIC}\"" build/windows/nsis/wails_tools.nsh
+
+      # Per-user (the Taskfile default): installs to %LOCALAPPDATA%\Programs
+      # with no UAC prompt, which is also what keeps self-update writable.
+      - name: Build the installer
+        run: wails3 task windows:package ARCH=amd64 INSTALL_SCOPE=user
+
+      # Two assets from one build. The -setup.exe is what the website offers
+      # for a first install; the .zip holds the bare executable, which is what
+      # a running launcher downloads to update itself (selfupdate/asset.go).
+      - name: Package
+        run: |
+          set -euo pipefail
+          NAME="wc-launcher-${TAG}-windows-amd64"
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+          mkdir -p dist
+
+          test -s "bin/${APP_NAME}.exe"
+          (cd bin && 7z a -tzip -bso0 "../dist/${NAME}.zip" "${APP_NAME}.exe")
+          cp "bin/${APP_NAME}-amd64-installer.exe" "dist/${NAME}-setup.exe"
+
+          # Git Bash has sha256sum, not shasum; the output shape is the same.
+          (cd dist && sha256sum "${NAME}.zip" > "${NAME}.zip.sha256" \
+                   && sha256sum "${NAME}-setup.exe" > "${NAME}-setup.exe.sha256")
+
+      # Unsigned for now: SmartScreen warns on first run until it is. When an
+      # Authenticode certificate exists, sign bin/<APP_NAME>.exe before
+      # packaging and the installer after (`wails3 task windows:sign` and
+      # `windows:sign:installer`), then pin the signer in
+      # selfupdate.verifySignature.
+      - name: Sign
+        if: false
+        run: echo "no Authenticode certificate configured"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.NAME }}
+          path: dist/*
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$TAG" dist/* --clobber

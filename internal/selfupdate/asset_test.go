@@ -43,7 +43,7 @@ func TestBothMacArchitecturesTakeTheUniversalBuild(t *testing.T) {
 
 func TestAReleaseWithNothingForThisPlatformIsNotAnUpdate(t *testing.T) {
 	release := Release{Tag: "v0.2.0", Assets: []Asset{
-		{Name: "wc-launcher-v0.2.0-windows-amd64.zip"},
+		{Name: "wc-launcher-v0.2.0-plan9-amd64.zip"},
 	}}
 
 	_, err := SelectAsset(release)
@@ -75,5 +75,40 @@ func TestChecksumAssetFindsTheSibling(t *testing.T) {
 
 	if _, ok := ChecksumAsset(Release{}, archive); ok {
 		t.Error("a release with no assets reported a checksum")
+	}
+}
+
+func windowsRelease() Release {
+	return Release{
+		Tag: "v0.2.0",
+		Assets: []Asset{
+			{Name: "wc-launcher-v0.2.0-macos-universal.zip"},
+			{Name: "wc-launcher-v0.2.0-windows-amd64-setup.exe"},
+			{Name: "wc-launcher-v0.2.0-windows-amd64-setup.exe.sha256"},
+			{Name: "wc-launcher-v0.2.0-windows-amd64.zip.sha256"},
+			{Name: "wc-launcher-v0.2.0-windows-amd64.zip"},
+		},
+	}
+}
+
+// The installer is for a first install from the website; an update swaps the
+// bare executable, which only the .zip carries.
+func TestWindowsTakesTheZipNotTheInstaller(t *testing.T) {
+	asset, err := selectAssetFor("windows/amd64", windowsRelease())
+	if err != nil {
+		t.Fatalf("selectAssetFor: %v", err)
+	}
+	if got, want := asset.Name, "wc-launcher-v0.2.0-windows-amd64.zip"; got != want {
+		t.Errorf("selectAssetFor = %q, want %q", got, want)
+	}
+}
+
+func TestAMacIsNotOfferedTheWindowsBuild(t *testing.T) {
+	asset, err := selectAssetFor("darwin/arm64", windowsRelease())
+	if err != nil {
+		t.Fatalf("selectAssetFor: %v", err)
+	}
+	if got, want := asset.Name, "wc-launcher-v0.2.0-macos-universal.zip"; got != want {
+		t.Errorf("selectAssetFor = %q, want %q", got, want)
 	}
 }

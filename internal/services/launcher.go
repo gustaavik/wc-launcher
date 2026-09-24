@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 
 	"github.com/gustaavik/wc-launcher/internal/install"
 	"github.com/gustaavik/wc-launcher/internal/markdown"
@@ -205,8 +206,18 @@ func (u *UpdateService) CancelLauncher() {
 }
 
 func unwritableMessage(target selfupdate.Target) string {
-	return fmt.Sprintf("%s cannot update itself where it is installed. Move it to your Applications folder and try again.",
-		filepath.Base(target.Path))
+	return unwritableMessageFor(runtime.GOOS, target)
+}
+
+// unwritableMessageFor names the fix in the OS's own terms. On Windows the
+// usual cause is an all-users install under Program Files, which needs admin
+// rights to write; a per-user install lands in %LOCALAPPDATA%\Programs.
+func unwritableMessageFor(goos string, target selfupdate.Target) string {
+	name := filepath.Base(target.Path)
+	if goos == "windows" {
+		return fmt.Sprintf("%s cannot update itself where it is installed. Reinstall it for your user account only and try again.", name)
+	}
+	return fmt.Sprintf("%s cannot update itself where it is installed. Move it to your Applications folder and try again.", name)
 }
 
 func toLauncherReleaseView(release selfupdate.Release) ReleaseView {
